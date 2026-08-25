@@ -1056,18 +1056,54 @@ function isSingleChoiceCorrect(q, index, value) {
   return false;
 }
 
-// Зображення самого завдання (не підказка).
-// image_question може містити повний URL, data:image/... або шлях у Supabase Storage.
+// Зображення самого завдання та фото розв'язань беруться з bucket question-images.
+// Структура bucket за секціями (без вкладених папок):
+//   question-images/math/<файл>
+//   question-images/history/<файл>
+//   question-images/ukrainian/<файл>   (якщо така папка буде створена)
 const QUESTION_IMAGE_BUCKET = "question-images";
+const SUBJECT_IMAGE_FOLDERS = {
+  math: "math",
+  history: "history",
+  ukrainian: "ukrainian"
+};
 
-function resolveQuestionImageSrc(value) {
+function getSubjectImageFolder(subject) {
+  return SUBJECT_IMAGE_FOLDERS[subject] || "";
+}
+
+function normalizeStoragePath(raw, subject = "") {
+  const clean = String(raw ?? "").trim().replace(/^\/+/, "");
+  if (!clean) return "";
+
+  const folder = getSubjectImageFolder(subject);
+  if (!folder) return clean;
+
+  // Якщо в БД вже записаний шлях із папкою предмета — не додаємо її повторно.
+  if (clean === folder || clean.startsWith(`${folder}/`)) return clean;
+
+  // Якщо записаний шлях із назвою bucket — прибираємо її перед додаванням папки.
+  const bucketPrefix = `${QUESTION_IMAGE_BUCKET}/`;
+  if (clean.startsWith(bucketPrefix)) {
+    const withoutBucket = clean.slice(bucketPrefix.length);
+    if (withoutBucket === folder || withoutBucket.startsWith(`${folder}/`)) return withoutBucket;
+    return `${folder}/${withoutBucket}`;
+  }
+
+  // Усередині секції вкладених папок немає: для імені файла просто додаємо
+  // папку відповідного предмета. Наприклад: history/kyivan_rus_11.png.
+  return `${folder}/${clean}`;
+}
+
+function resolveQuestionImageSrc(value, subject = activeSubject) {
   if (value == null) return "";
   const raw = String(value).trim();
   if (!raw) return "";
 
+  // Уже готове зображення: URL / data URL / blob URL.
   if (/^(https?:|data:image\/|blob:)/i.test(raw)) return raw;
 
-  // storage://bucket/path
+  // storage://bucket/path — підтримуємо окремо від секційної логіки.
   if (raw.startsWith("storage://")) {
     const rest = raw.slice("storage://".length);
     const slash = rest.indexOf("/");
@@ -1079,8 +1115,14 @@ function resolveQuestionImageSrc(value) {
     }
   }
 
-  // Если в БД хранится только путь, используем bucket question-images.
-  const { data } = supabaseClient.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(raw.replace(/^\/+/, ""));
+  // У БД можна зберігати лише ім'я файла. Тоді шлях формується через
+  // папку поточного предмета: math/<файл>, history/<файл>, ukrainian/<файл>.
+  const storagePath = normalizeStoragePath(raw, subject);
+  const { data } = supabaseClient
+    .storage
+    .from(QUESTION_IMAGE_BUCKET)
+    .getPublicUrl(storagePath);
+
   return data?.publicUrl || raw;
 }
 
@@ -1097,7 +1139,7 @@ function renderQuestion(mode) {
 
   const image = document.getElementById(`${prefix}-image`);
   const rawQuestionImage = q.image_question ?? q.image_path ?? "";
-  const questionImageSrc = resolveQuestionImageSrc(rawQuestionImage);
+  const questionImageSrc = resolveQuestionImageSrc(rawQuestionImage, activeSubject);
   image.innerHTML = questionImageSrc
     ? `<div class="question-image-wrap"><img class="question-image" src="${escapeHtml(questionImageSrc)}" alt="Зображення до завдання" loading="lazy"></div>`
     : "";
@@ -1146,9 +1188,10 @@ function renderQuestion(mode) {
           const gallery = document.getElementById("hint-images-gallery");
           const showing = gallery.style.display !== "none";
           if (showing) { gallery.style.display = "none"; return; }
-          gallery.innerHTML = q.solutionImages.map((src, i) =>
-            `<a href="${escapeHtml(src)}" target="_blank" rel="noopener"><img src="${escapeHtml(src)}" alt="Розв'язання, крок ${i + 1}"></a>`
-          ).join("");
+          gallery.innerHTML = q.solutionImages.map((src, i) => {
+            const resolvedSrc = resolveQuestionImageSrc(src, activeSubject);
+            return `<a href="${escapeHtml(resolvedSrc)}" target="_blank" rel="noopener"><img src="${escapeHtml(resolvedSrc)}" alt="Розв'язання, крок ${i + 1}"></a>`;
+          }).join("");
           gallery.style.display = "flex";
         });
       }
