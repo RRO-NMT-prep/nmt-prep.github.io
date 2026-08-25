@@ -1255,32 +1255,46 @@ function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
   });
 }
 
+/* Для short_answer правильну відповідь ВСЕГДА беремо напряму з колонки
+   short_answer поточного питання. Не покладаємось на correct_answer/right_answer. */
+function normalizeShortAnswerText(text) {
+  return String(text ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function gradeShortAnswer(q, value) {
+  const expected = String(q.short_answer ?? "").trim();
+  if (!expected) return { ungraded: true, expected: null, correct: false };
+  const correct = normalizeShortAnswerText(value) === normalizeShortAnswerText(expected);
+  return { ungraded: false, expected, correct };
+}
+
 function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
-  container.innerHTML = `<div class="short-answer-wrap"><input id="short-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь"><button id="short-answer-btn" class="primary-btn" type="button">Перевірити</button><div id="short-answer-result"></div></div>`;
+  // Під час пробного тесту кнопку «Перевірити» не показуємо — відповідь
+  // зберігається автоматично при переході до іншого питання/завершенні тесту.
+  const showCheck = mode !== "test";
+
+  container.innerHTML = `<div class="short-answer-wrap"><input id="short-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь">${showCheck ? `<button id="short-answer-btn" class="primary-btn" type="button">Перевірити</button><div id="short-answer-result"></div>` : ""}</div>`;
   const input = document.getElementById("short-answer-input");
   const resultEl = document.getElementById("short-answer-result");
   if (savedAnswer && savedAnswer.type === "short") {
     input.value = savedAnswer.value || "";
-    resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
+    if (resultEl) resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
   }
+
+  if (!showCheck) return;
+
   document.getElementById("short-answer-btn").addEventListener("click", () => {
     const value = input.value.trim();
     if (!value) return;
-    // Для short_answer правильний ответ ВСЕГДА берём напрямую из колонки
-    // short_answer текущего вопроса. Не полагаемся на correct_answer/right_answer.
-    const expected = String(q.short_answer ?? "").trim();
 
-    if (!expected) {
+    const { ungraded, expected, correct } = gradeShortAnswer(q, value);
+    if (ungraded) {
       resultEl.textContent = "Неможливо перевірити: правильна відповідь не заповнена.";
       return;
     }
-
-    const normalizeShortAnswer = (text) => String(text ?? "")
-      .trim()
-      .replace(/\\s+/g, " ")
-      .toLowerCase();
-
-    const correct = normalizeShortAnswer(value) === normalizeShortAnswer(expected);
 
     resultEl.textContent = correct
       ? "Правильно"
@@ -1298,15 +1312,37 @@ function normalizeMatchingChoice(value) {
   return ["a", "b", "c", "d", "e"].includes(token) ? `option_${token}` : raw;
 }
 
+/* Рахує кількість правильно зіставлених пар для завдання на відповідність
+   на основі поточного стану вибраних .matching-choice елементів. */
+function gradeMatchingChoices(q, choices) {
+  const correct = getQuestionCorrect(q);
+  let correctCount = 0;
+  const selections = {};
+
+  choices.forEach(choice => {
+    const key = String(choice.dataset.id);
+    const userValue = normalizeMatchingChoice(choice.dataset.value);
+    const expected = normalizeMatchingChoice(correct[key] ?? correct[String(key)]);
+    selections[key] = userValue;
+    if (userValue && expected && userValue === expected) correctCount++;
+  });
+
+  const ok = choices.length > 0 && correctCount === choices.length;
+  return { selections, correctCount, total: choices.length, correct: ok };
+}
+
 function renderMatchingQuestion(q, container, mode, savedAnswer) {
   const left = Array.isArray(q.matching_left) ? q.matching_left : [];
   const right = Array.isArray(q.matching_right) ? q.matching_right : [];
-  const correct = getQuestionCorrect(q);
 
   if (!left.length || !right.length) {
     container.innerHTML = "<p>Для завдання на відповідність не знайдені subquestion_1..N або option_a..option_e.</p>";
     return;
   }
+
+  // Під час пробного тесту кнопку «Перевірити» не показуємо — відповідь
+  // зберігається автоматично при переході до іншого питання/завершенні тесту.
+  const showCheck = mode !== "test";
 
   const savedSelections = savedAnswer?.type === "matching" ? (savedAnswer.selections || {}) : {};
   const optionLabel = (item) => String(typeof item === "object" ? (item.label ?? item.text ?? item.id ?? "") : item);
@@ -1338,7 +1374,7 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
           <div class="matching-choice-menu">${menuOptions}</div>
         </div>
       </div>`;
-  }).join("") + `<button id="matching-btn" class="primary-btn" type="button">Перевірити</button><div id="matching-result"></div>`;
+  }).join("") + (showCheck ? `<button id="matching-btn" class="primary-btn" type="button">Перевірити</button><div id="matching-result"></div>` : "");
 
   const closeMenus = (except = null) => {
     container.querySelectorAll(".matching-choice.open").forEach(menu => {
@@ -1375,32 +1411,17 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
   });
 
   const resultEl = document.getElementById("matching-result");
-  if (savedAnswer && savedAnswer.type === "matching") {
+  if (savedAnswer && savedAnswer.type === "matching" && resultEl) {
     resultEl.textContent = `Правильно: ${savedAnswer.correctCount} з ${savedAnswer.total}`;
   }
 
+  if (!showCheck) return;
+
   document.getElementById("matching-btn").addEventListener("click", () => {
     const choices = [...container.querySelectorAll(".matching-choice")];
-    let correctCount = 0;
-    const selections = {};
-
-    choices.forEach(choice => {
-      const key = String(choice.dataset.id);
-      const userValue = normalizeMatchingChoice(choice.dataset.value);
-      const expected = normalizeMatchingChoice(correct[key] ?? correct[String(key)]);
-      selections[key] = userValue;
-      if (userValue && expected && userValue === expected) correctCount++;
-    });
-
-    const ok = choices.length > 0 && correctCount === choices.length;
-    resultEl.textContent = `Правильно: ${correctCount} з ${choices.length}`;
-    recordAnswer(mode, {
-      type: "matching",
-      selections,
-      correctCount,
-      total: choices.length,
-      correct: ok
-    });
+    const graded = gradeMatchingChoices(q, choices);
+    resultEl.textContent = `Правильно: ${graded.correctCount} з ${graded.total}`;
+    recordAnswer(mode, { type: "matching", ...graded });
   });
 }
 
@@ -1428,8 +1449,38 @@ function renderTableQuestion(q, container, mode, savedAnswer) {
   });
 }
 
+/* Під час пробного тесту кнопки «Перевірити» для завдань на відповідність
+   і з короткою відповіддю приховані, тому їхній результат ніколи не
+   потрапляє у questionAnswers через клік. Ця функція «дотягує» поточну
+   відповідь із DOM і зберігає її (без показу фідбеку) щоразу, коли
+   користувач іде з питання — вперед, назад чи завершуючи тест. */
+function captureUnsavedAnswerIfNeeded(mode) {
+  if (mode !== "test") return;
+  const q = activeQuestions[currentQuestionIndex];
+  if (!q) return;
+
+  if (q.question_type === "short_answer") {
+    const input = document.getElementById("short-answer-input");
+    if (!input) return;
+    const value = input.value.trim();
+    if (!value) return;
+    const { ungraded, expected, correct } = gradeShortAnswer(q, value);
+    if (ungraded) return;
+    recordAnswer(mode, { type: "short", value, expected, correct });
+  } else if (q.question_type === "matching") {
+    const optionsHost = document.getElementById("test-options");
+    if (!optionsHost) return;
+    const choices = [...optionsHost.querySelectorAll(".matching-choice")];
+    if (!choices.length) return;
+    const graded = gradeMatchingChoices(q, choices);
+    recordAnswer(mode, { type: "matching", ...graded });
+  }
+}
+
 function advanceQuestion(mode) {
   if (currentQuestionIndex >= activeQuestions.length - 1) return;
+
+  captureUnsavedAnswerIfNeeded(mode);
 
   // Время сохраняем при уходе со страницы вопроса.
   // Но замораживаем его только когда выполнены ОБА условия:
@@ -1443,6 +1494,8 @@ function advanceQuestion(mode) {
 
 function goToPreviousQuestion(mode) {
   if (currentQuestionIndex <= 0) return;
+
+  captureUnsavedAnswerIfNeeded(mode);
 
   // Для «Назад» таймер не считается завершённым. Мы только сохраняем
   // уже набежавшее время; при возврате на неотвеченный вопрос отсчёт
@@ -1563,6 +1616,7 @@ function lookupNmtScore(subject, raw) {
 }
 
 async function finishTrialTest(autoFinished = false) {
+  captureUnsavedAnswerIfNeeded("test");
   captureCurrentQuestionElapsed();
   correctAnswersCount = tallyResults();
 
