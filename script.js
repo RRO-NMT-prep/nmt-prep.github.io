@@ -539,7 +539,9 @@ function normalizeQuestion(row, subject, topicKey) {
     hint2: row.hint2 || null,
     hint3: row.hint3 || null,
     weight: row.weight != null && Number(row.weight) > 0 ? Number(row.weight) : 1,
-    solutionImages: [row.hint_image_1, row.hint_image_2, row.hint_image_3].filter(v => v != null && String(v).trim() !== ''),
+    solutionImages: [row.hint_image_1, row.hint_image_2, row.hint_image_3]
+      .filter(v => v != null && String(v).trim() !== '')
+      .map(v => resolveQuestionImageSrc(v, subject)),
     explanation: row.explanation || null
   };
 }
@@ -1078,16 +1080,18 @@ function isSingleChoiceCorrect(q, index, value) {
 
 // Зображення самого завдання (не підказка).
 // image_question може містити повний URL, data:image/... або шлях у Supabase Storage.
+// Усі зображення завдань лежать в одному бакеті question-images, а всередині —
+// розкладені по підпапках відповідно до предмета: question-images/math/..., question-images/history/... і т.д.
 const QUESTION_IMAGE_BUCKET = "question-images";
 
-function resolveQuestionImageSrc(value) {
+function resolveQuestionImageSrc(value, subject) {
   if (value == null) return "";
   const raw = String(value).trim();
   if (!raw) return "";
 
   if (/^(https?:|data:image\/|blob:)/i.test(raw)) return raw;
 
-  // storage://bucket/path
+  // storage://bucket/path — явно вказаний бакет і шлях, підпапка предмета вже має бути в path.
   if (raw.startsWith("storage://")) {
     const rest = raw.slice("storage://".length);
     const slash = rest.indexOf("/");
@@ -1099,8 +1103,13 @@ function resolveQuestionImageSrc(value) {
     }
   }
 
-  // Если в БД хранится только путь, используем bucket question-images.
-  const { data } = supabaseClient.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(raw.replace(/^\/+/, ""));
+  // Якщо в БД зберігається лише ім'я файлу або відносний шлях — беремо бакет question-images
+  // і, якщо шлях ще не містить папку предмета, підставляємо її (наприклад: math/functions_1.jpg).
+  let path = raw.replace(/^\/+/, "");
+  if (subject && !path.startsWith(`${subject}/`)) {
+    path = `${subject}/${path}`;
+  }
+  const { data } = supabaseClient.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(path);
   return data?.publicUrl || raw;
 }
 
@@ -1118,7 +1127,7 @@ function renderQuestion(mode) {
 
   const image = document.getElementById(`${prefix}-image`);
   const rawQuestionImage = q.image_question ?? q.image_path ?? "";
-  const questionImageSrc = resolveQuestionImageSrc(rawQuestionImage);
+  const questionImageSrc = resolveQuestionImageSrc(rawQuestionImage, q.subject || activeSubject);
   image.innerHTML = questionImageSrc
     ? `<div class="question-image-wrap"><img class="question-image" src="${escapeHtml(questionImageSrc)}" alt="Зображення до завдання" loading="lazy"></div>`
     : "";
