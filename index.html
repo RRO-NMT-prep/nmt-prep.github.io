@@ -92,6 +92,8 @@
           <button class="nav-btn" data-nav="analytics">Аналітика</button>
           <button class="nav-btn" data-nav="leaderboard">Рейтинг</button>
           <button class="nav-btn" data-nav="profile">Профіль</button>
+          <button class="nav-btn" data-nav="reviews">Відгуки</button>
+          <button class="nav-btn" data-nav="theory">Архів теорії</button>
           <button class="nav-btn" data-nav="contacts">Контакти</button>
           <button class="nav-btn" data-nav="about">Про проєкт</button>
         </nav>
@@ -197,6 +199,59 @@
 
           <div class="card mt-16">
             <div id="leaderboard-list" class="leaderboard-container">
+              <p class="leaderboard-empty">Завантаження...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ВКЛАДКА: ВІДГУКИ -->
+        <div id="view-reviews" class="content-view">
+          <header class="content-header">
+            <h1>Відгуки</h1>
+            <p>Поділіться своїми враженнями від використання платформи — це допомагає нам ставати кращими.</p>
+          </header>
+
+          <div class="card reviews-summary-card">
+            <div class="reviews-average-score" id="reviews-average-score">—</div>
+            <div class="reviews-average-label">Загальний рейтинг <span id="reviews-average-count">(0 відгуків)</span></div>
+          </div>
+
+          <div class="card reviews-form-card">
+            <h3>Залишити відгук</h3>
+            <p class="modal-description">Оцініть платформу від 1 до 5 зірок і, за бажанням, напишіть коментар.</p>
+            <div class="reviews-stars-input" id="reviews-stars-input">
+              <button type="button" class="review-star-btn" data-star="1">★</button>
+              <button type="button" class="review-star-btn" data-star="2">★</button>
+              <button type="button" class="review-star-btn" data-star="3">★</button>
+              <button type="button" class="review-star-btn" data-star="4">★</button>
+              <button type="button" class="review-star-btn" data-star="5">★</button>
+            </div>
+            <textarea id="review-text-input" class="auth-input reviews-textarea" placeholder="Напишіть свій відгук..."></textarea>
+            <button id="review-submit-btn" class="primary-btn" type="button">Надіслати відгук</button>
+            <p id="review-status" class="modal-result"></p>
+          </div>
+
+          <div class="card">
+            <h3>Усі відгуки</h3>
+            <div id="reviews-list" class="reviews-list"></div>
+          </div>
+        </div>
+
+        <!-- ВКЛАДКА: АРХІВ ТЕОРІЇ -->
+        <div id="view-theory" class="content-view">
+          <header class="content-header">
+            <h1>Архів теорії</h1>
+            <p>Довідкові матеріали для швидкого та системного повторення перед складанням НМТ.</p>
+          </header>
+
+          <div class="filters-row">
+            <button class="theory-tab-btn active" data-theory="math">Формули математики</button>
+            <button class="theory-tab-btn" data-theory="ukrainian">Правила української мови</button>
+            <button class="theory-tab-btn" data-theory="history">Дати історії України</button>
+          </div>
+
+          <div class="card mt-16">
+            <div id="theory-content" class="theory-table-wrap">
               <p class="leaderboard-empty">Завантаження...</p>
             </div>
           </div>
@@ -354,7 +409,10 @@
       <div class="session-top-bar">
         <button id="test-exit-btn" class="secondary-btn">Вийти</button>
         <div class="session-progress-bar-container">
-          <div id="test-progress-label" class="session-progress-text">Питання 1</div>
+          <button id="test-nav-toggle" class="test-nav-toggle-btn" type="button">
+            <div id="test-progress-label" class="session-progress-text">Питання 1</div>
+            <span class="test-nav-toggle-arrow">▾</span>
+          </button>
           <div class="level-bar"><div id="test-progress-fill" class="level-fill" style="width: 0%;"></div></div>
         </div>
         <div class="top-timer-wrap">
@@ -363,6 +421,7 @@
           <span id="test-total-timer" class="test-total-timer">60:00</span>
         </div>
       </div>
+      <div id="test-nav-list" class="test-nav-list"></div>
       <div class="card session-card-main">
         <p id="test-question-text" class="session-q-text">Завантаження питання...</p>
         <div id="test-image"></div>

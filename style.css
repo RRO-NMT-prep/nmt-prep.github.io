@@ -3235,3 +3235,178 @@ body {
     max-height: 420px;
   }
 }
+
+/* =====================================================================
+   ГОРИЗОНТАЛЬНИЙ НАВІГАТОР ПИТАНЬ (ПРОБНИЙ ТЕСТ)
+   ===================================================================== */
+.test-nav-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.test-nav-toggle-arrow {
+  color: var(--text-muted);
+  font-size: 12px;
+  transition: transform 0.15s ease;
+}
+
+.test-nav-toggle-btn:hover .test-nav-toggle-arrow { color: var(--accent); }
+
+.test-nav-list {
+  display: none;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 4px;
+  margin: 4px 0 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.test-nav-list.open { display: flex; }
+
+.test-nav-item {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel-alt);
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.test-nav-item:hover { border-color: var(--accent); }
+.test-nav-item.answered { border-color: var(--accent); color: var(--accent); }
+.test-nav-item.current { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* =====================================================================
+   ВІДГУКИ
+   ===================================================================== */
+.reviews-summary-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 24px;
+  text-align: center;
+}
+
+.reviews-average-score {
+  font-size: 42px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.reviews-average-label {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.reviews-form-card { margin-top: 16px; }
+
+.reviews-stars-input {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.review-star-btn {
+  background: none;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--border-color);
+  transition: color 0.15s ease, transform 0.1s ease;
+  padding: 0;
+}
+
+.review-star-btn:hover { transform: scale(1.1); }
+.review-star-btn.filled { color: #facc15; }
+
+.reviews-textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  margin-bottom: 12px;
+  font-family: inherit;
+}
+
+.reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.review-row {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: var(--bg-panel-alt);
+}
+
+.review-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.review-row-stars { color: #facc15; letter-spacing: 1px; }
+.review-row-text { color: var(--text-main); font-size: 14px; line-height: 1.5; }
+
+/* =====================================================================
+   АРХІВ ТЕОРІЇ
+   ===================================================================== */
+.theory-tab-btn {
+  background: var(--bg-panel-alt);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  border-radius: 20px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.theory-tab-btn:hover { color: var(--text-main); }
+.theory-tab-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.theory-table-wrap { overflow-x: auto; }
+
+.theory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.theory-table th,
+.theory-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.theory-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--bg-panel-alt);
+}
+
+.theory-table tr:last-child td { border-bottom: none; }

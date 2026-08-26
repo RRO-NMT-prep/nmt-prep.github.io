@@ -522,7 +522,7 @@ function normalizeQuestion(row, subject, topicKey) {
 
   return {
     id: row.id,
-    exam_position: row.exam_position ?? row.nmt_number ?? row.question_number ?? row.task_number ?? row.position ?? row.order ?? row.number ?? null,
+    exam_position: row.exam_position ?? row.q_num ?? row.nmt_number ?? row.question_number ?? row.task_number ?? row.position ?? row.order ?? row.number ?? null,
     subject,
     topic: row.topic || topicKey,
     question_type: type,
@@ -596,29 +596,49 @@ async function loadQuestionsForPlan(subject, plan) {
   return shuffle(result);
 }
 
+/*
+ * Пробний тест НМТ збирається номер за номером (1, 2, 3, ...).
+ * Для кожного номера завдання скрипт бере ВИПАДКОВУ тему предмета
+ * і шукає в ній питання з відповідним q_num (колонка q_num у БД,
+ * див. exam_position у normalizeQuestion). Якщо в обраній темі такого
+ * номера немає — пробуємо іншу випадкову тему, і так, поки не
+ * переберемо всі теми. Якщо жодна тема не містить цей номер —
+ * завдання пропускається і тест іде далі.
+ */
 async function loadNmtQuestions(subject) {
   lastFetchErrors = [];
   const topics = TOPICS[subject] || [];
   const pools = [];
   for (const topic of topics) {
     const rows = await fetchTopicQuestions(subject, topic.key);
-    if (rows.length) pools.push({ topic: topic.key, rows: shuffle(rows) });
+    if (rows.length) pools.push({ topic: topic.key, rows: [...rows] });
   }
   if (!pools.length) return [];
 
   const target = NMT_COUNTS[subject];
   const selected = [];
-  let cursor = 0;
-  let guard = 0;
-  while (selected.length < target && guard < target * 20) {
-    const pool = pools[cursor % pools.length];
-    if (pool.rows.length) selected.push(pool.rows.shift());
-    pools.splice(0, 0); // no-op: keeps array stable
-    cursor++;
-    if (pools.every(p => p.rows.length === 0)) break;
-    guard++;
+
+  for (let num = 1; num <= target; num++) {
+    const topicOrder = shuffle(pools);
+    let found = false;
+
+    for (const pool of topicOrder) {
+      const matches = pool.rows.filter(row => Number(row.exam_position) === num);
+      if (!matches.length) continue;
+
+      const pick = matches[Math.floor(Math.random() * matches.length)];
+      pool.rows = pool.rows.filter(row => row !== pick);
+      selected.push(pick);
+      found = true;
+      break;
+    }
+
+    if (!found) {
+      console.warn(`НМТ (${subject}): жодна тема не містить питання з q_num=${num} — номер пропущено.`);
+    }
   }
-  return shuffle(selected).slice(0, target);
+
+  return selected;
 }
 
 function topicLabel(subject, key) {
@@ -1056,54 +1076,18 @@ function isSingleChoiceCorrect(q, index, value) {
   return false;
 }
 
-// Зображення самого завдання та фото розв'язань беруться з bucket question-images.
-// Структура bucket за секціями (без вкладених папок):
-//   question-images/math/<файл>
-//   question-images/history/<файл>
-//   question-images/ukrainian/<файл>   (якщо така папка буде створена)
+// Зображення самого завдання (не підказка).
+// image_question може містити повний URL, data:image/... або шлях у Supabase Storage.
 const QUESTION_IMAGE_BUCKET = "question-images";
-const SUBJECT_IMAGE_FOLDERS = {
-  math: "math",
-  history: "history",
-  ukrainian: "ukrainian"
-};
 
-function getSubjectImageFolder(subject) {
-  return SUBJECT_IMAGE_FOLDERS[subject] || "";
-}
-
-function normalizeStoragePath(raw, subject = "") {
-  const clean = String(raw ?? "").trim().replace(/^\/+/, "");
-  if (!clean) return "";
-
-  const folder = getSubjectImageFolder(subject);
-  if (!folder) return clean;
-
-  // Якщо в БД вже записаний шлях із папкою предмета — не додаємо її повторно.
-  if (clean === folder || clean.startsWith(`${folder}/`)) return clean;
-
-  // Якщо записаний шлях із назвою bucket — прибираємо її перед додаванням папки.
-  const bucketPrefix = `${QUESTION_IMAGE_BUCKET}/`;
-  if (clean.startsWith(bucketPrefix)) {
-    const withoutBucket = clean.slice(bucketPrefix.length);
-    if (withoutBucket === folder || withoutBucket.startsWith(`${folder}/`)) return withoutBucket;
-    return `${folder}/${withoutBucket}`;
-  }
-
-  // Усередині секції вкладених папок немає: для імені файла просто додаємо
-  // папку відповідного предмета. Наприклад: history/kyivan_rus_11.png.
-  return `${folder}/${clean}`;
-}
-
-function resolveQuestionImageSrc(value, subject = activeSubject) {
+function resolveQuestionImageSrc(value) {
   if (value == null) return "";
   const raw = String(value).trim();
   if (!raw) return "";
 
-  // Уже готове зображення: URL / data URL / blob URL.
   if (/^(https?:|data:image\/|blob:)/i.test(raw)) return raw;
 
-  // storage://bucket/path — підтримуємо окремо від секційної логіки.
+  // storage://bucket/path
   if (raw.startsWith("storage://")) {
     const rest = raw.slice("storage://".length);
     const slash = rest.indexOf("/");
@@ -1115,14 +1099,8 @@ function resolveQuestionImageSrc(value, subject = activeSubject) {
     }
   }
 
-  // У БД можна зберігати лише ім'я файла. Тоді шлях формується через
-  // папку поточного предмета: math/<файл>, history/<файл>, ukrainian/<файл>.
-  const storagePath = normalizeStoragePath(raw, subject);
-  const { data } = supabaseClient
-    .storage
-    .from(QUESTION_IMAGE_BUCKET)
-    .getPublicUrl(storagePath);
-
+  // Если в БД хранится только путь, используем bucket question-images.
+  const { data } = supabaseClient.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(raw.replace(/^\/+/, ""));
   return data?.publicUrl || raw;
 }
 
@@ -1133,13 +1111,14 @@ function renderQuestion(mode) {
   const progress = ((currentQuestionIndex + 1) / total) * 100;
   document.getElementById(`${prefix}-progress-label`).textContent = `Питання ${currentQuestionIndex + 1} з ${total}`;
   document.getElementById(`${prefix}-progress-fill`).style.width = `${progress}%`;
+  if (mode === "test") renderTestNav();
   startQuestionTimer();
   document.getElementById(`${prefix}-topic-label`).textContent = mode === "test" ? topicLabel(activeSubject, q.topic) : topicLabel(activeSubject, q.topic);
   document.getElementById(`${prefix}-question-text`).innerHTML = escapeHtml(q.question_text).replace(/\n/g, "<br>");
 
   const image = document.getElementById(`${prefix}-image`);
   const rawQuestionImage = q.image_question ?? q.image_path ?? "";
-  const questionImageSrc = resolveQuestionImageSrc(rawQuestionImage, activeSubject);
+  const questionImageSrc = resolveQuestionImageSrc(rawQuestionImage);
   image.innerHTML = questionImageSrc
     ? `<div class="question-image-wrap"><img class="question-image" src="${escapeHtml(questionImageSrc)}" alt="Зображення до завдання" loading="lazy"></div>`
     : "";
@@ -1188,10 +1167,9 @@ function renderQuestion(mode) {
           const gallery = document.getElementById("hint-images-gallery");
           const showing = gallery.style.display !== "none";
           if (showing) { gallery.style.display = "none"; return; }
-          gallery.innerHTML = q.solutionImages.map((src, i) => {
-            const resolvedSrc = resolveQuestionImageSrc(src, activeSubject);
-            return `<a href="${escapeHtml(resolvedSrc)}" target="_blank" rel="noopener"><img src="${escapeHtml(resolvedSrc)}" alt="Розв'язання, крок ${i + 1}"></a>`;
-          }).join("");
+          gallery.innerHTML = q.solutionImages.map((src, i) =>
+            `<a href="${escapeHtml(src)}" target="_blank" rel="noopener"><img src="${escapeHtml(src)}" alt="Розв'язання, крок ${i + 1}"></a>`
+          ).join("");
           gallery.style.display = "flex";
         });
       }
@@ -1215,6 +1193,47 @@ function renderQuestion(mode) {
 
   renderMathIn(document.getElementById(`${prefix}-question-text`).closest(".session-card-main"));
 }
+
+/* Горизонтальний навігатор питань для пробного тесту.
+   Підписи навмисне прості: «Питання 1», «Питання 2» тощо (без номерів
+   завдань НМТ чи назв тем) — саме так, як просив користувач. */
+function renderTestNav() {
+  const list = document.getElementById("test-nav-list");
+  if (!list) return;
+
+  list.innerHTML = activeQuestions.map((_, i) => {
+    const classes = ["test-nav-item"];
+    if (i === currentQuestionIndex) classes.push("current");
+    if (questionAnswers[i]) classes.push("answered");
+    return `<button type="button" class="${classes.join(" ")}" data-index="${i}">Питання ${i + 1}</button>`;
+  }).join("");
+
+  list.querySelectorAll(".test-nav-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.index);
+      list.classList.remove("open");
+      if (idx === currentQuestionIndex) return;
+      captureCurrentQuestionElapsed();
+      questionFinalized[currentQuestionIndex] = !!questionAnswers[currentQuestionIndex];
+      currentQuestionIndex = idx;
+      renderQuestion("test");
+    });
+  });
+}
+
+document.getElementById("test-nav-toggle")?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  document.getElementById("test-nav-list")?.classList.toggle("open");
+});
+
+document.addEventListener("click", (event) => {
+  const list = document.getElementById("test-nav-list");
+  const toggle = document.getElementById("test-nav-toggle");
+  if (!list || !toggle) return;
+  if (!list.contains(event.target) && !toggle.contains(event.target)) {
+    list.classList.remove("open");
+  }
+});
 
 /* Зберігає (чи оновлює) відповідь користувача на поточне питання.
    Можна викликати повторно — вибір завжди можна змінити до завершення сесії. */
@@ -1248,9 +1267,32 @@ function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
 }
 
 function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
+  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
+  // відповідь зберігається автоматично при кожній зміні вибору.
+  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+  const isTest = mode === 'test';
   const letters = ['A', 'B', 'C', 'D', 'E'];
   const saved = savedAnswer && savedAnswer.type === 'multiple' ? (savedAnswer.selectedIndices || []) : [];
   container.innerHTML = '';
+
+  const evaluateAndRecord = () => {
+    const selectedIndices = [...container.querySelectorAll('.session-option')]
+      .map((el, i) => el.classList.contains('selected') ? i : -1)
+      .filter(i => i >= 0);
+    const selectedTokens = selectedIndices.map(i => letters[i].toLowerCase());
+    const rawCorrect = getQuestionCorrect(q);
+    let expectedTokens = [];
+    if (Array.isArray(rawCorrect)) expectedTokens = rawCorrect.map(normalizeOptionToken).filter(Boolean);
+    else if (rawCorrect && Array.isArray(rawCorrect.options)) expectedTokens = rawCorrect.options.map(normalizeOptionToken).filter(Boolean);
+    else if (rawCorrect?.value != null) expectedTokens = String(rawCorrect.value).split(/[,;\s]+/).map(normalizeOptionToken).filter(Boolean);
+    else if (rawCorrect?.option != null) expectedTokens = [normalizeOptionToken(rawCorrect.option)];
+
+    expectedTokens = [...new Set(expectedTokens)].sort();
+    const actualTokens = [...new Set(selectedTokens)].sort();
+    const correct = JSON.stringify(actualTokens) === JSON.stringify(expectedTokens);
+    recordAnswer(mode, { type: 'multiple', selectedIndices, correct, expected: expectedTokens });
+    return correct;
+  };
 
   q.options.forEach((text, index) => {
     if (text == null || String(text).trim() === '') return;
@@ -1260,9 +1302,12 @@ function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
     if (saved.includes(index)) el.classList.add('selected');
     el.addEventListener('click', () => {
       el.classList.toggle('selected');
+      if (isTest) evaluateAndRecord();
     });
     container.appendChild(el);
   });
+
+  if (isTest) return;
 
   const checkBtn = document.createElement('button');
   checkBtn.id = 'multiple-answer-btn';
@@ -1279,71 +1324,63 @@ function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
   }
 
   checkBtn.addEventListener('click', () => {
-    const selectedIndices = [...container.querySelectorAll('.session-option')]
-      .map((el, i) => el.classList.contains('selected') ? i : -1)
-      .filter(i => i >= 0);
-    const selectedTokens = selectedIndices.map(i => letters[i].toLowerCase());
-    const rawCorrect = getQuestionCorrect(q);
-    let expectedTokens = [];
-    if (Array.isArray(rawCorrect)) expectedTokens = rawCorrect.map(normalizeOptionToken).filter(Boolean);
-    else if (rawCorrect && Array.isArray(rawCorrect.options)) expectedTokens = rawCorrect.options.map(normalizeOptionToken).filter(Boolean);
-    else if (rawCorrect?.value != null) expectedTokens = String(rawCorrect.value).split(/[,;\s]+/).map(normalizeOptionToken).filter(Boolean);
-    else if (rawCorrect?.option != null) expectedTokens = [normalizeOptionToken(rawCorrect.option)];
-
-    expectedTokens = [...new Set(expectedTokens)].sort();
-    const actualTokens = [...new Set(selectedTokens)].sort();
-    const correct = JSON.stringify(actualTokens) === JSON.stringify(expectedTokens);
+    const correct = evaluateAndRecord();
     resultEl.textContent = correct ? 'Правильно' : 'Неправильно';
-    recordAnswer(mode, { type: 'multiple', selectedIndices, correct, expected: expectedTokens });
   });
 }
 
-/* Для short_answer правильну відповідь ВСЕГДА беремо напряму з колонки
-   short_answer поточного питання. Не покладаємось на correct_answer/right_answer. */
-function normalizeShortAnswerText(text) {
-  return String(text ?? "")
+function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
+  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
+  // відповідь зберігається автоматично під час введення.
+  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+  const isTest = mode === "test";
+
+  container.innerHTML = `<div class="short-answer-wrap"><input id="short-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь">${isTest ? "" : `<button id="short-answer-btn" class="primary-btn" type="button">Перевірити</button>`}<div id="short-answer-result"></div></div>`;
+  const input = document.getElementById("short-answer-input");
+  const resultEl = document.getElementById("short-answer-result");
+
+  const normalizeShortAnswer = (text) => String(text ?? "")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
-}
 
-function gradeShortAnswer(q, value) {
+  // Для short_answer правильний ответ ВСЕГДА берём напрямую из колонки
+  // short_answer текущего вопроса. Не полагаемся на correct_answer/right_answer.
   const expected = String(q.short_answer ?? "").trim();
-  if (!expected) return { ungraded: true, expected: null, correct: false };
-  const correct = normalizeShortAnswerText(value) === normalizeShortAnswerText(expected);
-  return { ungraded: false, expected, correct };
-}
 
-function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
-  // Під час пробного тесту кнопку «Перевірити» не показуємо — відповідь
-  // зберігається автоматично при переході до іншого питання/завершенні тесту.
-  const showCheck = mode !== "test";
+  const evaluateAndRecord = () => {
+    const value = input.value.trim();
+    const correct = !!value && !!expected && normalizeShortAnswer(value) === normalizeShortAnswer(expected);
+    recordAnswer(mode, { type: "short", value, expected, correct });
+    return correct;
+  };
 
-  container.innerHTML = `<div class="short-answer-wrap"><input id="short-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь">${showCheck ? `<button id="short-answer-btn" class="primary-btn" type="button">Перевірити</button><div id="short-answer-result"></div>` : ""}</div>`;
-  const input = document.getElementById("short-answer-input");
-  const resultEl = document.getElementById("short-answer-result");
   if (savedAnswer && savedAnswer.type === "short") {
     input.value = savedAnswer.value || "";
-    if (resultEl) resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
+    if (!isTest) {
+      resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
+    }
   }
 
-  if (!showCheck) return;
+  if (isTest) {
+    input.addEventListener("input", () => evaluateAndRecord());
+    return;
+  }
 
   document.getElementById("short-answer-btn").addEventListener("click", () => {
     const value = input.value.trim();
     if (!value) return;
 
-    const { ungraded, expected, correct } = gradeShortAnswer(q, value);
-    if (ungraded) {
+    if (!expected) {
       resultEl.textContent = "Неможливо перевірити: правильна відповідь не заповнена.";
       return;
     }
 
+    const correct = evaluateAndRecord();
     resultEl.textContent = correct
       ? "Правильно"
       : `Неправильно. Правильна відповідь: ${expected}`;
     renderMathIn(resultEl);
-    recordAnswer(mode, { type: "short", value, expected, correct });
   });
 }
 
@@ -1355,37 +1392,19 @@ function normalizeMatchingChoice(value) {
   return ["a", "b", "c", "d", "e"].includes(token) ? `option_${token}` : raw;
 }
 
-/* Рахує кількість правильно зіставлених пар для завдання на відповідність
-   на основі поточного стану вибраних .matching-choice елементів. */
-function gradeMatchingChoices(q, choices) {
-  const correct = getQuestionCorrect(q);
-  let correctCount = 0;
-  const selections = {};
-
-  choices.forEach(choice => {
-    const key = String(choice.dataset.id);
-    const userValue = normalizeMatchingChoice(choice.dataset.value);
-    const expected = normalizeMatchingChoice(correct[key] ?? correct[String(key)]);
-    selections[key] = userValue;
-    if (userValue && expected && userValue === expected) correctCount++;
-  });
-
-  const ok = choices.length > 0 && correctCount === choices.length;
-  return { selections, correctCount, total: choices.length, correct: ok };
-}
-
 function renderMatchingQuestion(q, container, mode, savedAnswer) {
+  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
+  // відповідь зберігається автоматично при кожному виборі варіанту.
+  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+  const isTest = mode === "test";
   const left = Array.isArray(q.matching_left) ? q.matching_left : [];
   const right = Array.isArray(q.matching_right) ? q.matching_right : [];
+  const correct = getQuestionCorrect(q);
 
   if (!left.length || !right.length) {
     container.innerHTML = "<p>Для завдання на відповідність не знайдені subquestion_1..N або option_a..option_e.</p>";
     return;
   }
-
-  // Під час пробного тесту кнопку «Перевірити» не показуємо — відповідь
-  // зберігається автоматично при переході до іншого питання/завершенні тесту.
-  const showCheck = mode !== "test";
 
   const savedSelections = savedAnswer?.type === "matching" ? (savedAnswer.selections || {}) : {};
   const optionLabel = (item) => String(typeof item === "object" ? (item.label ?? item.text ?? item.id ?? "") : item);
@@ -1417,12 +1436,36 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
           <div class="matching-choice-menu">${menuOptions}</div>
         </div>
       </div>`;
-  }).join("") + (showCheck ? `<button id="matching-btn" class="primary-btn" type="button">Перевірити</button><div id="matching-result"></div>` : "");
+  }).join("") + (isTest ? "" : `<button id="matching-btn" class="primary-btn" type="button">Перевірити</button><div id="matching-result"></div>`);
 
   const closeMenus = (except = null) => {
     container.querySelectorAll(".matching-choice.open").forEach(menu => {
       if (menu !== except) menu.classList.remove("open");
     });
+  };
+
+  const evaluateAndRecord = () => {
+    const choices = [...container.querySelectorAll(".matching-choice")];
+    let correctCount = 0;
+    const selections = {};
+
+    choices.forEach(choice => {
+      const key = String(choice.dataset.id);
+      const userValue = normalizeMatchingChoice(choice.dataset.value);
+      const expected = normalizeMatchingChoice(correct[key] ?? correct[String(key)]);
+      selections[key] = userValue;
+      if (userValue && expected && userValue === expected) correctCount++;
+    });
+
+    const ok = choices.length > 0 && correctCount === choices.length;
+    recordAnswer(mode, {
+      type: "matching",
+      selections,
+      correctCount,
+      total: choices.length,
+      correct: ok
+    });
+    return { correctCount, total: choices.length };
   };
 
   container.querySelectorAll(".matching-choice").forEach(choice => {
@@ -1446,6 +1489,7 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
         option.classList.add("selected");
         choice.classList.remove("open");
         renderMathIn(valueEl);
+        if (isTest) evaluateAndRecord();
       });
     });
 
@@ -1453,77 +1497,62 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
     choice.querySelectorAll(".matching-choice-option").forEach(option => renderMathIn(option));
   });
 
+  if (isTest) return;
+
   const resultEl = document.getElementById("matching-result");
-  if (savedAnswer && savedAnswer.type === "matching" && resultEl) {
+  if (savedAnswer && savedAnswer.type === "matching") {
     resultEl.textContent = `Правильно: ${savedAnswer.correctCount} з ${savedAnswer.total}`;
   }
 
-  if (!showCheck) return;
-
   document.getElementById("matching-btn").addEventListener("click", () => {
-    const choices = [...container.querySelectorAll(".matching-choice")];
-    const graded = gradeMatchingChoices(q, choices);
-    resultEl.textContent = `Правильно: ${graded.correctCount} з ${graded.total}`;
-    recordAnswer(mode, { type: "matching", ...graded });
+    const { correctCount, total } = evaluateAndRecord();
+    resultEl.textContent = `Правильно: ${correctCount} з ${total}`;
   });
 }
 
 function renderTableQuestion(q, container, mode, savedAnswer) {
+  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
+  // відповідь зберігається автоматично під час введення.
+  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+  const isTest = mode === "test";
   const data = q.table_data;
   if (!data) { container.innerHTML = "<p>Для табличного завдання не заповнено table_data.</p>"; return; }
   let headers = [], rows = [];
   if (Array.isArray(data)) rows = data;
   else { headers = data.headers || data.columns || []; rows = data.rows || []; }
   if (!headers.length && rows.length && Array.isArray(rows[0])) headers = rows[0].map((_,i)=>`Колонка ${i+1}`);
-  container.innerHTML = `<div class="question-table-wrap"><table class="question-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${(Array.isArray(r)?r:Object.values(r)).map(v=>`<td>${escapeHtml(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="table-answer-wrap"><input id="table-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь"><button id="table-answer-btn" class="primary-btn" type="button">Перевірити</button><div id="table-answer-result"></div></div>`;
+
+  container.innerHTML = `<div class="question-table-wrap"><table class="question-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${(Array.isArray(r)?r:Object.values(r)).map(v=>`<td>${escapeHtml(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="table-answer-wrap"><input id="table-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь">${isTest ? "" : `<button id="table-answer-btn" class="primary-btn" type="button">Перевірити</button>`}<div id="table-answer-result"></div></div>`;
   const input = document.getElementById("table-answer-input");
   const resultEl = document.getElementById("table-answer-result");
+  const c = getQuestionCorrect(q);
+  const expected = String(c.value ?? c.option ?? "").trim();
+
+  const evaluateAndRecord = () => {
+    const value = input.value.trim();
+    const ok = value.toLowerCase() === expected.toLowerCase();
+    recordAnswer(mode, { type: "table", value, expected, correct: ok });
+    return ok;
+  };
+
   if (savedAnswer && savedAnswer.type === "table") {
     input.value = savedAnswer.value || "";
-    resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
+    if (!isTest) resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
   }
+
+  if (isTest) {
+    input.addEventListener("input", () => evaluateAndRecord());
+    return;
+  }
+
   document.getElementById("table-answer-btn").addEventListener("click", () => {
-    const value = input.value.trim();
-    const c = getQuestionCorrect(q);
-    const expected = String(c.value ?? c.option ?? "").trim();
-    const ok = value.toLowerCase() === expected.toLowerCase();
+    const ok = evaluateAndRecord();
     resultEl.textContent = ok ? "Правильно" : `Неправильно. Правильна відповідь: ${expected}`;
-    recordAnswer(mode, { type: "table", value, expected, correct: ok });
   });
-}
-
-/* Під час пробного тесту кнопки «Перевірити» для завдань на відповідність
-   і з короткою відповіддю приховані, тому їхній результат ніколи не
-   потрапляє у questionAnswers через клік. Ця функція «дотягує» поточну
-   відповідь із DOM і зберігає її (без показу фідбеку) щоразу, коли
-   користувач іде з питання — вперед, назад чи завершуючи тест. */
-function captureUnsavedAnswerIfNeeded(mode) {
-  if (mode !== "test") return;
-  const q = activeQuestions[currentQuestionIndex];
-  if (!q) return;
-
-  if (q.question_type === "short_answer") {
-    const input = document.getElementById("short-answer-input");
-    if (!input) return;
-    const value = input.value.trim();
-    if (!value) return;
-    const { ungraded, expected, correct } = gradeShortAnswer(q, value);
-    if (ungraded) return;
-    recordAnswer(mode, { type: "short", value, expected, correct });
-  } else if (q.question_type === "matching") {
-    const optionsHost = document.getElementById("test-options");
-    if (!optionsHost) return;
-    const choices = [...optionsHost.querySelectorAll(".matching-choice")];
-    if (!choices.length) return;
-    const graded = gradeMatchingChoices(q, choices);
-    recordAnswer(mode, { type: "matching", ...graded });
-  }
 }
 
 function advanceQuestion(mode) {
   if (currentQuestionIndex >= activeQuestions.length - 1) return;
-
-  captureUnsavedAnswerIfNeeded(mode);
 
   // Время сохраняем при уходе со страницы вопроса.
   // Но замораживаем его только когда выполнены ОБА условия:
@@ -1537,8 +1566,6 @@ function advanceQuestion(mode) {
 
 function goToPreviousQuestion(mode) {
   if (currentQuestionIndex <= 0) return;
-
-  captureUnsavedAnswerIfNeeded(mode);
 
   // Для «Назад» таймер не считается завершённым. Мы только сохраняем
   // уже набежавшее время; при возврате на неотвеченный вопрос отсчёт
@@ -1659,7 +1686,6 @@ function lookupNmtScore(subject, raw) {
 }
 
 async function finishTrialTest(autoFinished = false) {
-  captureUnsavedAnswerIfNeeded("test");
   captureCurrentQuestionElapsed();
   correctAnswersCount = tallyResults();
 
@@ -1729,6 +1755,160 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
     if (nav === "analytics") renderAnalytics();
     if (nav === "profile") renderProfileView();
     if (nav === "leaderboard") loadLeaderboard();
+    if (nav === "reviews") loadReviews();
+    if (nav === "theory") loadTheory(theoryTab);
+  });
+});
+
+/* ---------------------------------------------------------------------
+   ВІДГУКИ (public/feedback схема Supabase, таблиця reviews)
+   --------------------------------------------------------------------- */
+let selectedReviewStars = 0;
+
+function renderReviewStarsInput() {
+  const wrap = document.getElementById("reviews-stars-input");
+  if (!wrap) return;
+  wrap.querySelectorAll(".review-star-btn").forEach(btn => {
+    btn.classList.toggle("filled", Number(btn.dataset.star) <= selectedReviewStars);
+  });
+}
+
+function setupReviewStarsInput() {
+  const wrap = document.getElementById("reviews-stars-input");
+  if (!wrap) return;
+  wrap.querySelectorAll(".review-star-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      selectedReviewStars = Number(btn.dataset.star);
+      renderReviewStarsInput();
+    });
+  });
+}
+
+async function loadReviews() {
+  const listEl = document.getElementById("reviews-list");
+  const avgEl = document.getElementById("reviews-average-score");
+  const countEl = document.getElementById("reviews-average-count");
+  if (!listEl) return;
+  listEl.innerHTML = `<p class="leaderboard-empty">Завантаження...</p>`;
+
+  const { data, error } = await supabaseClient
+    .schema("feedback")
+    .from("reviews")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    listEl.innerHTML = `<p class="leaderboard-empty">Помилка завантаження відгуків: ${error.message}</p>`;
+    return;
+  }
+
+  const reviews = data || [];
+  if (!reviews.length) {
+    avgEl.textContent = "—";
+    countEl.textContent = "(0 відгуків)";
+    listEl.innerHTML = `<p class="leaderboard-empty">Відгуків ще немає — станьте першими!</p>`;
+    return;
+  }
+
+  const sum = reviews.reduce((s, r) => s + Number(r.rating || 0), 0);
+  const avg = sum / reviews.length;
+  avgEl.textContent = avg.toFixed(1);
+  countEl.textContent = `(${reviews.length} ${reviews.length === 1 ? "відгук" : "відгуків"})`;
+
+  listEl.innerHTML = reviews.map(r => `
+    <div class="review-row">
+      <div class="review-row-head">
+        <strong>${escapeHtml(r.nickname || "Анонім")}</strong>
+        <span class="review-row-stars">${"★".repeat(Number(r.rating) || 0)}${"☆".repeat(5 - (Number(r.rating) || 0))}</span>
+      </div>
+      <p class="review-row-text">${escapeHtml(r.review_text)}</p>
+    </div>
+  `).join("");
+}
+
+document.getElementById("review-submit-btn")?.addEventListener("click", async () => {
+  const status = document.getElementById("review-status");
+  const textInput = document.getElementById("review-text-input");
+  const text = textInput.value.trim();
+
+  if (!selectedReviewStars) { status.textContent = "Оберіть кількість зірок."; return; }
+  if (!text) { status.textContent = "Напишіть текст відгуку."; return; }
+  if (!currentUser) { status.textContent = "Потрібно увійти в акаунт, щоб залишити відгук."; return; }
+
+  status.textContent = "Надсилаю...";
+  const { error } = await supabaseClient.schema("feedback").from("reviews").insert([{
+    user_id: currentUser.id,
+    nickname: currentProfile?.nickname || "Анонім",
+    rating: selectedReviewStars,
+    review_text: text
+  }]);
+
+  if (error) { status.textContent = "Помилка: " + error.message; return; }
+
+  status.textContent = "Дякуємо за відгук!";
+  textInput.value = "";
+  selectedReviewStars = 0;
+  renderReviewStarsInput();
+  loadReviews();
+});
+
+setupReviewStarsInput();
+
+/* ---------------------------------------------------------------------
+   АРХІВ ТЕОРІЇ (схема theory: math_formulas, ukrainian_rules, history_dates)
+   --------------------------------------------------------------------- */
+const THEORY_TABLES = {
+  math: { schema: "theory", table: "math_formulas", cols: ["formula", "application"], headers: ["Формула", "Застосування"] },
+  ukrainian: { schema: "theory", table: "ukrainian_rules", cols: ["rule", "example"], headers: ["Правило", "Приклад"] },
+  history: { schema: "theory", table: "history_dates", cols: ["event_date", "event"], headers: ["Дата", "Подія"] }
+};
+
+let theoryTab = "math";
+let theoryCache = {};
+
+async function loadTheory(tab) {
+  const host = document.getElementById("theory-content");
+  if (!host) return;
+  host.innerHTML = `<p class="leaderboard-empty">Завантаження...</p>`;
+
+  if (!theoryCache[tab]) {
+    const cfg = THEORY_TABLES[tab];
+    const { data, error } = await supabaseClient
+      .schema(cfg.schema)
+      .from(cfg.table)
+      .select("*")
+      .order("sort_order", { ascending: true });
+
+    if (error) {
+      host.innerHTML = `<p class="leaderboard-empty">Помилка завантаження: ${error.message}</p>`;
+      return;
+    }
+    theoryCache[tab] = data || [];
+  }
+
+  const cfg = THEORY_TABLES[tab];
+  const rows = theoryCache[tab];
+  if (!rows.length) {
+    host.innerHTML = `<p class="leaderboard-empty">Матеріалів у цьому розділі поки немає.</p>`;
+    return;
+  }
+
+  host.innerHTML = `
+    <table class="theory-table">
+      <thead><tr>${cfg.headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+      <tbody>
+        ${rows.map(r => `<tr>${cfg.cols.map(c => `<td>${escapeHtml(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
+      </tbody>
+    </table>`;
+  renderMathIn(host);
+}
+
+document.querySelectorAll(".theory-tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".theory-tab-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    theoryTab = btn.dataset.theory;
+    loadTheory(theoryTab);
   });
 });
 
