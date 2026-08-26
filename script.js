@@ -405,14 +405,20 @@ function normalizeQuestionType(value) {
   return aliases[raw] || 'single_choice';
 }
 
+// Максимальна кількість варіантів відповіді (option_a..option_j) — 10, з запасом.
+// Раніше було жорстко a-e (5), через що завдання з option_f/option_g (як cossack_ruin)
+// обрізались до перших 5 варіантів.
+const OPTION_LETTERS = ['a','b','c','d','e','f','g','h','i','j'];
+
 function normalizeOptionToken(value) {
   if (value == null) return '';
   const s = String(value).trim().toLowerCase();
-  const map = { a:'a', b:'b', c:'c', d:'d', e:'e', а:'a', б:'b', в:'c', г:'d', ґ:'e' };
+  const map = { а:'a', б:'b', в:'c', г:'d', ґ:'e' };
+  OPTION_LETTERS.forEach(l => { map[l] = l; });
   if (map[s]) return map[s];
-  const optionMatch = s.match(/^option[_\s-]?([a-e])$/i);
+  const optionMatch = s.match(/^option[_\s-]?([a-j])$/i);
   if (optionMatch) return optionMatch[1].toLowerCase();
-  if (/^[1-5]$/.test(s)) return ['a','b','c','d','e'][Number(s) - 1];
+  if (/^([1-9]|10)$/.test(s)) return OPTION_LETTERS[Number(s) - 1];
   return s;
 }
 
@@ -421,7 +427,7 @@ function normalizeCorrect(value) {
   if (typeof value === 'object') return value;
   const s = String(value).trim();
   const option = normalizeOptionToken(s);
-  if (['a','b','c','d','e'].includes(option)) return { option };
+  if (OPTION_LETTERS.includes(option)) return { option };
   return { value: s };
 }
 
@@ -446,16 +452,15 @@ function buildMatchingData(row, options) {
 
     // Для matching значення відповіді в БД — option_a / option_b / ... .
     // Тому саме ці токени використовуємо як value, а не A/B/C/D.
-    const letters = ["a", "b", "c", "d", "e"];
     const right = options.map((text, i) => ({
-      id: `option_${letters[i]}`,
+      id: `option_${OPTION_LETTERS[i]}`,
       label: String(text)
     }));
 
     const correct = {};
     answerColumns.forEach(({ index, value }) => {
       const token = normalizeOptionToken(value);
-      if (token && letters.includes(token)) {
+      if (token && OPTION_LETTERS.includes(token)) {
         correct[String(index)] = `option_${token}`;
       }
     });
@@ -481,7 +486,8 @@ function normalizeQuestion(row, subject, topicKey) {
 
   let options = parseJson(row.options, []);
   if (!Array.isArray(options) || options.length === 0) {
-    options = [row.option_a, row.option_b, row.option_c, row.option_d, row.option_e]
+    options = OPTION_LETTERS
+      .map(letter => row[`option_${letter}`])
       .filter(v => v != null && String(v).trim() !== '');
   }
 
@@ -1072,8 +1078,7 @@ function isSingleChoiceCorrect(q, index, value) {
   const c = getQuestionCorrect(q);
   if (c.index != null) return Number(c.index) === index;
   const target = normalizeOptionToken(c.option ?? c.value);
-  const letters = ["a", "b", "c", "d", "e"];
-  if (letters.includes(target)) return target === letters[index];
+  if (OPTION_LETTERS.includes(target)) return target === OPTION_LETTERS[index];
   if (target !== "" && value != null) return String(value).trim() === String(c.value ?? target).trim();
   return false;
 }
@@ -1256,7 +1261,7 @@ function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
   // відповідь зберігається автоматично при кожному виборі варіанту.
   // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
   const isTest = mode === "test";
-  const letters = ["A", "B", "C", "D", "E"];
+  const letters = OPTION_LETTERS.map(l => l.toUpperCase());
   let selectedIndex = savedAnswer && savedAnswer.type === "single" ? savedAnswer.selectedIndex : null;
 
   const evaluateAndRecord = () => {
@@ -1311,7 +1316,7 @@ function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
   // відповідь зберігається автоматично при кожній зміні вибору.
   // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
   const isTest = mode === 'test';
-  const letters = ['A', 'B', 'C', 'D', 'E'];
+  const letters = OPTION_LETTERS.map(l => l.toUpperCase());
   const saved = savedAnswer && savedAnswer.type === 'multiple' ? (savedAnswer.selectedIndices || []) : [];
   container.innerHTML = '';
 
@@ -1427,9 +1432,9 @@ function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
 function normalizeMatchingChoice(value) {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return "";
-  if (/^option_[a-e]$/.test(raw)) return raw;
+  if (/^option_[a-j]$/.test(raw)) return raw;
   const token = normalizeOptionToken(raw);
-  return ["a", "b", "c", "d", "e"].includes(token) ? `option_${token}` : raw;
+  return OPTION_LETTERS.includes(token) ? `option_${token}` : raw;
 }
 
 function renderMatchingQuestion(q, container, mode, savedAnswer) {
@@ -1448,7 +1453,7 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
 
   const savedSelections = savedAnswer?.type === "matching" ? (savedAnswer.selections || {}) : {};
   const optionLabel = (item) => String(typeof item === "object" ? (item.label ?? item.text ?? item.id ?? "") : item);
-  const optionId = (item, index) => normalizeMatchingChoice(typeof item === "object" ? item.id : item) || `option_${["a", "b", "c", "d", "e"][index]}`;
+  const optionId = (item, index) => normalizeMatchingChoice(typeof item === "object" ? item.id : item) || `option_${OPTION_LETTERS[index]}`;
 
   container.innerHTML = left.map((item, i) => {
     const id = String(typeof item === "object" ? (item.id ?? i + 1) : i + 1);
