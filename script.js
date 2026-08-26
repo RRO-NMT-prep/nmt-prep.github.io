@@ -1243,27 +1243,58 @@ function recordAnswer(mode, data) {
 }
 
 function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
+  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
+  // відповідь зберігається автоматично при кожному виборі варіанту.
+  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+  const isTest = mode === "test";
   const letters = ["A", "B", "C", "D", "E"];
+  let selectedIndex = savedAnswer && savedAnswer.type === "single" ? savedAnswer.selectedIndex : null;
+
+  const evaluateAndRecord = () => {
+    const text = q.options[selectedIndex];
+    const correct = isSingleChoiceCorrect(q, selectedIndex, text);
+    recordAnswer(mode, { type: "single", selectedIndex, correct });
+    return correct;
+  };
+
   q.options.forEach((text, index) => {
     if (text == null || String(text).trim() === "") return;
     const el = document.createElement("div");
     el.className = "session-option";
     el.innerHTML = `<div class="session-option-letter">${letters[index]}</div><span>${escapeHtml(text)}</span>`;
+    if (selectedIndex === index) el.classList.add("selected");
     el.addEventListener("click", () => {
       // Дозволяємо переобирати відповідь будь-яку кількість разів до завершення сесії.
       // Правильність не підсвічується кольором — лише позначаємо обраний варіант.
       [...container.children].forEach(c => c.classList.remove("selected"));
       el.classList.add("selected");
-      const correct = isSingleChoiceCorrect(q, index, text);
-      recordAnswer(mode, { type: "single", selectedIndex: index, correct });
+      selectedIndex = index;
+      if (isTest) evaluateAndRecord();
     });
     container.appendChild(el);
   });
 
+  if (isTest) return;
+
+  const checkBtn = document.createElement("button");
+  checkBtn.id = "single-answer-btn";
+  checkBtn.className = "primary-btn";
+  checkBtn.type = "button";
+  checkBtn.textContent = "Перевірити";
+  const resultEl = document.createElement("div");
+  resultEl.id = "single-answer-result";
+  container.appendChild(checkBtn);
+  container.appendChild(resultEl);
+
   if (savedAnswer && savedAnswer.type === "single") {
-    const selEl = container.children[savedAnswer.selectedIndex];
-    if (selEl) selEl.classList.add("selected");
+    resultEl.textContent = savedAnswer.correct ? "Правильно" : "Неправильно";
   }
+
+  checkBtn.addEventListener("click", () => {
+    if (selectedIndex == null) { resultEl.textContent = "Оберіть варіант відповіді."; return; }
+    const correct = evaluateAndRecord();
+    resultEl.textContent = correct ? "Правильно" : "Неправильно";
+  });
 }
 
 function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
