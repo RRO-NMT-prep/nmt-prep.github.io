@@ -1949,14 +1949,17 @@ async function loadTheory(tab) {
 }
 
 // Формули/правила часто складаються з кількох рядків, розділених порожнім
-// рядком (\n\n) у базі. Розбиваємо їх на окремі блоки з відступами, інакше
-// все зливається в один суцільний рядок тексту.
+// рядком (\n\n) у базі. Розбиваємо їх на окремі блоки з відступами.
+// Всередині одного блоку (наприклад, LaTeX \begin{array}...\end{array})
+// одинарні переноси рядків НЕ перетворюємо на <br> — інакше KaTeX auto-render
+// розриває $$...$$ на кілька текстових вузлів і математика не рендериться
+// (просто лишаємо \n як є: браузер сам згорне його в пробіл).
 function renderTheoryCell(raw) {
   const text = String(raw ?? "").trim();
   if (!text) return "";
   return text
     .split(/\n\s*\n/)
-    .map(p => `<div class="theory-formula-line">${escapeHtml(p).replace(/\n/g, "<br>")}</div>`)
+    .map(p => `<div class="theory-formula-line">${escapeHtml(p)}</div>`)
     .join("");
 }
 
