@@ -1942,10 +1942,22 @@ async function loadTheory(tab) {
     <table class="theory-table">
       <thead><tr>${cfg.headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
       <tbody>
-        ${rows.map(r => `<tr>${cfg.cols.map(c => `<td>${escapeHtml(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
+        ${rows.map(r => `<tr>${cfg.cols.map(c => `<td>${renderTheoryCell(r[c])}</td>`).join("")}</tr>`).join("")}
       </tbody>
     </table>`;
   renderMathIn(host);
+}
+
+// Формули/правила часто складаються з кількох рядків, розділених порожнім
+// рядком (\n\n) у базі. Розбиваємо їх на окремі блоки з відступами, інакше
+// все зливається в один суцільний рядок тексту.
+function renderTheoryCell(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return "";
+  return text
+    .split(/\n\s*\n/)
+    .map(p => `<div class="theory-formula-line">${escapeHtml(p).replace(/\n/g, "<br>")}</div>`)
+    .join("");
 }
 
 document.querySelectorAll(".theory-tab-btn").forEach(btn => {
