@@ -1089,12 +1089,26 @@ function isSingleChoiceCorrect(q, index, value) {
 // розкладені по підпапках відповідно до предмета: question-images/math/..., question-images/history/... і т.д.
 const QUESTION_IMAGE_BUCKET = "question-images";
 
+// У бакеті question-images підпапка для української мови фізично зветься "ukranian"
+// (без другої "i"), хоча предмет у коді й БД називається "ukrainian". Без цієї мапи
+// шлях складався б як ukrainian/<file> і публічний URL вів би у неіснуючу папку —
+// картинки для укр. мови просто не завантажувались би.
+const SUBJECT_STORAGE_FOLDERS = {
+  ukrainian: "ukranian"
+};
+
+function subjectStorageFolder(subject) {
+  return SUBJECT_STORAGE_FOLDERS[subject] || subject;
+}
+
 function resolveQuestionImageSrc(value, subject) {
   if (value == null) return "";
   const raw = String(value).trim();
   if (!raw) return "";
 
   if (/^(https?:|data:image\/|blob:)/i.test(raw)) return raw;
+
+  const folder = subjectStorageFolder(subject);
 
   // storage://bucket/path — явно вказаний бакет і шлях, підпапка предмета вже має бути в path.
   if (raw.startsWith("storage://")) {
@@ -1111,8 +1125,14 @@ function resolveQuestionImageSrc(value, subject) {
   // Якщо в БД зберігається лише ім'я файлу або відносний шлях — беремо бакет question-images
   // і, якщо шлях ще не містить папку предмета, підставляємо її (наприклад: math/functions_1.jpg).
   let path = raw.replace(/^\/+/, "");
-  if (subject && !path.startsWith(`${subject}/`)) {
-    path = `${subject}/${path}`;
+  if (folder) {
+    if (subject && path.startsWith(`${subject}/`)) {
+      // В БД шлях уже записаний як "ukrainian/...", а реальна папка в бакеті — "ukranian".
+      // Підміняємо саме назву папки предмета, не чіпаючи решту шляху.
+      path = `${folder}${path.slice(subject.length)}`;
+    } else if (!path.startsWith(`${folder}/`)) {
+      path = `${folder}/${path}`;
+    }
   }
   const { data } = supabaseClient.storage.from(QUESTION_IMAGE_BUCKET).getPublicUrl(path);
   return data?.publicUrl || raw;
