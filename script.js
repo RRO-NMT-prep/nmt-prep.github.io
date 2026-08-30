@@ -1826,35 +1826,7 @@ document.querySelector(".contact-email-link")?.addEventListener("click", (event)
   window.location.href = `mailto:${email}`;
 });
 
-  /*
-     Для Android використовуємо Intent URI з ACTION_SENDTO + mailto.
-     Це передає Gmail не просто «відкритися», а саме email-адресу
-     як одержувача нового листа. Пакет com.google.android.gm
-     примусово спрямовує Intent у Gmail.
-  */
-  const intentUrl =
-    `intent://${email}` +
-    `#Intent;scheme=mailto;action=android.intent.action.SENDTO;` +
-    `package=com.google.android.gm;end`;
-
-  // Невеликий fallback: якщо Android/Chrome не прийме intent,
-  // повертаємося до стандартного mailto:.
-  let fallbackTimer = setTimeout(() => {
-    window.location.href = mailtoUrl;
-  }, 1200);
-
-  const cancelFallback = () => {
-    clearTimeout(fallbackTimer);
-    window.removeEventListener("pagehide", cancelFallback);
-    window.removeEventListener("blur", cancelFallback);
-  };
-
-  window.addEventListener("pagehide", cancelFallback, { once: true });
-  window.addEventListener("blur", cancelFallback, { once: true });
-
-  window.location.href = intentUrl;
-});
-
+  
 /* ---------------------------------------------------------------------
    НАВІГАЦІЯ
    --------------------------------------------------------------------- */
