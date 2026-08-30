@@ -70,10 +70,32 @@ const authSwitchBtn = document.getElementById("auth-switch-btn");
 const authSwitchText = document.getElementById("auth-switch-text");
 const authModeSubtitle = document.getElementById("auth-mode-subtitle");
 const authNote = document.getElementById("auth-note");
+const passwordToggleLogin = document.getElementById("password-toggle-login");
+const passwordToggleRegister = document.getElementById("password-toggle-register");
+
+function setPasswordVisibility(visible, sourceButton) {
+  passwordInput.type = visible ? "text" : "password";
+  document.querySelectorAll(".password-toggle").forEach(btn => {
+    const active = btn === sourceButton;
+    btn.classList.toggle("is-visible", visible && active);
+    btn.setAttribute("aria-label", visible ? "Сховати пароль" : "Показати пароль");
+    btn.setAttribute("title", visible ? "Сховати пароль" : "Показати пароль");
+  });
+}
+
+function togglePassword(sourceButton) {
+  setPasswordVisibility(passwordInput.type === "password", sourceButton);
+}
+
+passwordToggleLogin?.addEventListener("click", () => togglePassword(passwordToggleLogin));
+passwordToggleRegister?.addEventListener("click", () => togglePassword(passwordToggleRegister));
 
 function setAuthMode(mode) {
   authMode = mode;
   authNote.textContent = "";
+  setPasswordVisibility(false, null);
+  passwordToggleLogin.hidden = mode !== "login";
+  passwordToggleRegister.hidden = mode !== "register";
   if (mode === "login") {
     authModeSubtitle.textContent = "Увійдіть у свій акаунт";
     authSubmitBtn.textContent = "Увійти";
@@ -1817,15 +1839,24 @@ document.getElementById("result-back-btn").addEventListener("click", () => showS
    КОНТАКТИ — Android: відкрити саме Gmail з адресою в «Кому»
    --------------------------------------------------------------------- */
 document.querySelector(".contact-email-link")?.addEventListener("click", (event) => {
-  const link = event.currentTarget;
-  const email = (link.textContent || "").trim();
-
-  if (!email) return;
-
   event.preventDefault();
-  window.location.href = `mailto:${email}`;
-});
 
+  const email = "rronmtprepcontacts@gmail.com";
+
+  const isMobile =
+    /Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+
+  if (isMobile) {
+    // Телефон — открываем почтовое приложение через mailto:
+    window.location.href = `mailto:${email}`;
+  } else {
+    // ПК — сразу открываем Gmail с заполненным получателем
+    window.open(
+      `https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(email)}`,
+      "_blank"
+    );
+  }
+});
   
 /* ---------------------------------------------------------------------
    НАВІГАЦІЯ
