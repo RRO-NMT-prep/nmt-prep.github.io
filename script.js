@@ -1817,17 +1817,15 @@ document.getElementById("result-back-btn").addEventListener("click", () => showS
    КОНТАКТИ — відкрити Gmail одразу з адресою в полі «Кому»
    --------------------------------------------------------------------- */
 document.querySelector(".contact-email-link")?.addEventListener("click", (event) => {
-  event.preventDefault();
-
   const link = event.currentTarget;
-  const email = link.textContent.trim() || link.getAttribute("href").replace(/^mailto:/i, "");
+  const href = link.getAttribute("href") || "";
+  const email = link.textContent.trim() || href.replace(/^mailto:/i, "");
 
-  // Gmail приймає адресу одержувача через параметр `to`.
-  // Це надійніше, ніж намагатися вставляти текст у поле Gmail через clipboard,
-  // оскільки Gmail працює на іншому домені й браузер не дозволяє керувати його DOM.
-  const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
-
-  window.location.href = gmailUrl;
+  // Не відкриваємо mail.google.com у браузері.
+  // Передаємо адресу системному mailto:, щоб Android/Chrome
+  // відкрив встановлений Gmail безпосередньо у вікні написання листа.
+  event.preventDefault();
+  window.location.href = `mailto:${encodeURIComponent(email)}`;
 });
 
 /* ---------------------------------------------------------------------
