@@ -1814,18 +1814,50 @@ document.getElementById("test-exit-btn").addEventListener("click", () => {
 document.getElementById("result-back-btn").addEventListener("click", () => showScreen("screen-dashboard"));
 
 /* ---------------------------------------------------------------------
-   КОНТАКТИ — відкрити Gmail одразу з адресою в полі «Кому»
+   КОНТАКТИ — Android: відкрити саме Gmail з адресою в «Кому»
    --------------------------------------------------------------------- */
 document.querySelector(".contact-email-link")?.addEventListener("click", (event) => {
   const link = event.currentTarget;
-  const href = link.getAttribute("href") || "";
-  const email = link.textContent.trim() || href.replace(/^mailto:/i, "");
+  const email = (link.textContent || "").trim();
+  if (!email) return;
 
-  // Не відкриваємо mail.google.com у браузері.
-  // Передаємо адресу системному mailto:, щоб Android/Chrome
-  // відкрив встановлений Gmail безпосередньо у вікні написання листа.
   event.preventDefault();
-  window.location.href = `mailto:${encodeURIComponent(email)}`;
+
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const mailtoUrl = `mailto:${email}`;
+
+  if (!isAndroid) {
+    window.location.href = mailtoUrl;
+    return;
+  }
+
+  /*
+     Для Android використовуємо Intent URI з ACTION_SENDTO + mailto.
+     Це передає Gmail не просто «відкритися», а саме email-адресу
+     як одержувача нового листа. Пакет com.google.android.gm
+     примусово спрямовує Intent у Gmail.
+  */
+  const intentUrl =
+    `intent://${email}` +
+    `#Intent;scheme=mailto;action=android.intent.action.SENDTO;` +
+    `package=com.google.android.gm;end`;
+
+  // Невеликий fallback: якщо Android/Chrome не прийме intent,
+  // повертаємося до стандартного mailto:.
+  let fallbackTimer = setTimeout(() => {
+    window.location.href = mailtoUrl;
+  }, 1200);
+
+  const cancelFallback = () => {
+    clearTimeout(fallbackTimer);
+    window.removeEventListener("pagehide", cancelFallback);
+    window.removeEventListener("blur", cancelFallback);
+  };
+
+  window.addEventListener("pagehide", cancelFallback, { once: true });
+  window.addEventListener("blur", cancelFallback, { once: true });
+
+  window.location.href = intentUrl;
 });
 
 /* ---------------------------------------------------------------------
