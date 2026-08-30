@@ -285,19 +285,26 @@ async function loadLeaderboard() {
     });
   }
   let rows = [...leaderboardCache];
-  let valKey = leaderboardFilter === "questions" ? "totalQuestions" : (leaderboardFilter === "accuracy" ? "accuracy" : `${leaderboardFilter}_score`);
+  let valKey = leaderboardFilter === "questions" ? "totalQuestions"
+    : leaderboardFilter === "accuracy" ? "accuracy"
+    : leaderboardFilter === "level" ? "level"
+    : `${leaderboardFilter}_score`;
   let suffix = leaderboardFilter === "accuracy" ? "%" : "";
-  
-  rows = leaderboardFilter === "questions" || leaderboardFilter === "accuracy" ? rows : rows.filter(r => r[valKey] != null);
-  rows.sort((a, b) => b[valKey] - a[valKey]);
+
+  const alwaysShown = ["questions", "accuracy", "level"];
+  rows = alwaysShown.includes(leaderboardFilter) ? rows : rows.filter(r => r[valKey] != null);
+  rows.sort((a, b) => (b[valKey] || 0) - (a[valKey] || 0));
 
   if (rows.length === 0) { listEl.innerHTML = `<p class="leaderboard-empty">Немає результатів.</p>`; return; }
-  listEl.innerHTML = rows.slice(0, 20).map((r, i) => `
+  listEl.innerHTML = rows.slice(0, 20).map((r, i) => {
+    const displayValue = leaderboardFilter === "level" ? (r[valKey] || 1) : r[valKey];
+    return `
     <div class="leaderboard-row">
       <span class="leaderboard-rank">${i + 1}</span>
       <span class="leaderboard-name">${r.nickname || "Анонім"}</span>
-      <span class="leaderboard-value">${r[valKey]}${suffix}</span>
-    </div>`).join("");
+      <span class="leaderboard-value">${displayValue}${suffix}</span>
+    </div>`;
+  }).join("");
 }
 
 document.querySelectorAll(".filter-btn").forEach(btn => {
