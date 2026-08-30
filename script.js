@@ -1819,17 +1819,12 @@ document.getElementById("result-back-btn").addEventListener("click", () => showS
 document.querySelector(".contact-email-link")?.addEventListener("click", (event) => {
   const link = event.currentTarget;
   const email = (link.textContent || "").trim();
+
   if (!email) return;
 
   event.preventDefault();
-
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  const mailtoUrl = `mailto:${email}`;
-
-  if (!isAndroid) {
-    window.location.href = mailtoUrl;
-    return;
-  }
+  window.location.href = `mailto:${email}`;
+});
 
   /*
      Для Android використовуємо Intent URI з ACTION_SENDTO + mailto.
