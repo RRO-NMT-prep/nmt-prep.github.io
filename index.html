@@ -34,7 +34,15 @@
           <input type="email" id="email-input" class="auth-input" placeholder="name@example.com">
           
           <label class="auth-label">Пароль</label>
-          <input type="password" id="password-input" class="auth-input" placeholder="••••••••">
+          <div class="password-input-wrap">
+            <input type="password" id="password-input" class="auth-input" placeholder="••••••••" autocomplete="current-password">
+            <button id="password-toggle-login" class="password-toggle" type="button" aria-label="Показати пароль" title="Показати пароль">
+              <span class="eye-icon" aria-hidden="true"></span>
+            </button>
+            <button id="password-toggle-register" class="password-toggle" type="button" aria-label="Показати пароль" title="Показати пароль" hidden>
+              <span class="eye-icon" aria-hidden="true"></span>
+            </button>
+          </div>
           
           <button id="auth-submit-btn" class="auth-btn" type="button">Увійти</button>
           <p id="auth-note" class="auth-note"></p>
@@ -270,7 +278,14 @@
             <div class="info-page-content">
               <h3>Зворотний зв’язок</h3>
               <p>Ви можете написати нам, щоб повідомити про помилку на сайті, неточність у питаннях або запропонувати власні ідеї та зміни.</p>
-              <a class="contact-email-link" href="mailto:rronmtprepcontacts@gmail.com">rronmtprepcontacts@gmail.com</a>
+              <a
+                class="contact-email-link"
+                id="contact-email-link"
+                href="https://mail.google.com/mail/?view=cm&fs=1&to=rronmtprepcontacts@gmail.com&su=%D0%9F%D0%BE%D0%B2%D1%96%D0%B4%D0%BE%D0%BC%D0%BB%D0%B5%D0%BD%D0%BD%D1%8F%20%D0%B7%20%D1%81%D0%B0%D0%B9%D1%82%D1%83%20RRO.NMT"
+                target="_blank"
+                rel="noopener noreferrer"
+              >rronmtprepcontacts@gmail.com</a>
+              <p class="contact-email-hint">Натисніть, щоб одразу відкрити Gmail із заповненим полем «Кому»</p>
               <p class="info-page-note"></p>
             </div>
           </div>

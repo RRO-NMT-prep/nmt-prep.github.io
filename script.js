@@ -73,11 +73,8 @@ const authNote = document.getElementById("auth-note");
 const passwordToggleLogin = document.getElementById("password-toggle-login");
 const passwordToggleRegister = document.getElementById("password-toggle-register");
 
-function setPasswordVisibility(visible, sourceButton = null) {
-  if (!passwordInput) return;
-
+function setPasswordVisibility(visible, sourceButton) {
   passwordInput.type = visible ? "text" : "password";
-
   document.querySelectorAll(".password-toggle").forEach(btn => {
     const active = btn === sourceButton;
     btn.classList.toggle("is-visible", visible && active);
@@ -87,90 +84,53 @@ function setPasswordVisibility(visible, sourceButton = null) {
 }
 
 function togglePassword(sourceButton) {
-  if (!passwordInput) return;
   setPasswordVisibility(passwordInput.type === "password", sourceButton);
 }
 
-passwordToggleLogin?.addEventListener("click", (event) => {
-  event.preventDefault();
-  togglePassword(passwordToggleLogin);
-});
-
-passwordToggleRegister?.addEventListener("click", (event) => {
-  event.preventDefault();
-  togglePassword(passwordToggleRegister);
-});
+passwordToggleLogin?.addEventListener("click", () => togglePassword(passwordToggleLogin));
+passwordToggleRegister?.addEventListener("click", () => togglePassword(passwordToggleRegister));
 
 function setAuthMode(mode) {
-  authMode = mode === "register" ? "register" : "login";
-
-  if (authNote) authNote.textContent = "";
+  authMode = mode;
+  authNote.textContent = "";
   setPasswordVisibility(false, null);
-
-  if (passwordToggleLogin) passwordToggleLogin.hidden = authMode !== "login";
-  if (passwordToggleRegister) passwordToggleRegister.hidden = authMode !== "register";
-
-  if (authMode === "login") {
-    if (authModeSubtitle) authModeSubtitle.textContent = "Увійдіть у свій акаунт";
-    if (authSubmitBtn) authSubmitBtn.textContent = "Увійти";
-    if (authSwitchText) authSwitchText.textContent = "Немає акаунту?";
-    if (authSwitchBtn) authSwitchBtn.textContent = "Зареєструватися";
+  passwordToggleLogin.hidden = mode !== "login";
+  passwordToggleRegister.hidden = mode !== "register";
+  if (mode === "login") {
+    authModeSubtitle.textContent = "Увійдіть у свій акаунт";
+    authSubmitBtn.textContent = "Увійти";
+    authSwitchText.textContent = "Немає акаунту?";
+    authSwitchBtn.textContent = "Зареєструватися";
   } else {
-    if (authModeSubtitle) authModeSubtitle.textContent = "Створіть новий акаунт";
-    if (authSubmitBtn) authSubmitBtn.textContent = "Зареєструватися";
-    if (authSwitchText) authSwitchText.textContent = "Вже є акаунт?";
-    if (authSwitchBtn) authSwitchBtn.textContent = "Увійти";
+    authModeSubtitle.textContent = "Створіть новий акаунт";
+    authSubmitBtn.textContent = "Зареєструватися";
+    authSwitchText.textContent = "Вже є акаунт?";
+    authSwitchBtn.textContent = "Увійти";
   }
 }
 
-// ВАЖЛИВО: кнопка переключення має лише змінювати режим,
-// а не відправляти форму або перезавантажувати сторінку.
-authSwitchBtn?.addEventListener("click", (event) => {
-  event.preventDefault();
-  setAuthMode(authMode === "login" ? "register" : "login");
-});
-
-authSubmitBtn?.addEventListener("click", (event) => {
-  event.preventDefault();
-  handleAuthSubmit();
-});
-
-passwordInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    handleAuthSubmit();
-  }
-});
+authSwitchBtn.addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
+authSubmitBtn.addEventListener("click", handleAuthSubmit);
+passwordInput.addEventListener("keydown", (e) => { if (e.key === "Enter") handleAuthSubmit(); });
 
 async function handleAuthSubmit() {
-  if (!emailInput || !passwordInput || !authSubmitBtn || !authNote) return;
-
   const email = emailInput.value.trim();
   const password = passwordInput.value;
-
-  if (!email || !password) {
-    authNote.textContent = "Заповніть email та пароль.";
-    return;
-  }
+  if (!email || !password) { authNote.textContent = "Заповніть email та пароль."; return; }
 
   authSubmitBtn.disabled = true;
   authNote.textContent = "";
 
   try {
     let authData, authError;
-
     if (authMode === "login") {
       const res = await supabaseClient.auth.signInWithPassword({ email, password });
-      authData = res.data;
-      authError = res.error;
+      authData = res.data; authError = res.error;
     } else {
       const res = await supabaseClient.auth.signUp({ email, password });
-      authData = res.data;
-      authError = res.error;
+      authData = res.data; authError = res.error;
     }
-
     if (authError) throw authError;
-
     currentUser = authData.user;
     await checkAndLoadProfile();
   } catch (err) {
