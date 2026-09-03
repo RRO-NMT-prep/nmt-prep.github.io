@@ -3514,6 +3514,52 @@ body {
 
 .theory-table tr:nth-child(even) td { background: var(--bg-panel-alt); }
 
+.theory-files-wrap { display: flex; flex-direction: column; gap: 10px; }
+
+.theory-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.theory-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  background: var(--bg-panel-alt);
+}
+
+.theory-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.theory-file-name {
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theory-file-size {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.theory-file-download-btn {
+  flex-shrink: 0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .theory-formula-line {
   line-height: 1.9;
   margin-bottom: 14px;

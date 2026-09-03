@@ -1873,7 +1873,7 @@ document.querySelectorAll(".nav-btn").forEach(btn => {
     if (nav === "profile") renderProfileView();
     if (nav === "leaderboard") loadLeaderboard();
     if (nav === "reviews") loadReviews();
-    if (nav === "theory") loadTheory(theoryTab);
+    if (nav === "theory") { loadTheory(theoryTab); loadTheoryFiles(theoryTab); }
   });
 });
 
@@ -2041,8 +2041,75 @@ document.querySelectorAll(".theory-tab-btn").forEach(btn => {
     btn.classList.add("active");
     theoryTab = btn.dataset.theory;
     loadTheory(theoryTab);
+    loadTheoryFiles(theoryTab);
   });
 });
+
+/* ---------------------------------------------------------------------
+   ФАЙЛИ АРХІВУ ТЕОРІЇ (Supabase Storage, bucket "materials")
+   Структура бакета: materials/math/*, materials/ukrainian/*, materials/history/*
+   --------------------------------------------------------------------- */
+const THEORY_FILES_BUCKET = "materials";
+const THEORY_FILES_FOLDERS = {
+  math: "math",
+  ukrainian: "ukrainian",
+  history: "history"
+};
+
+let theoryFilesCache = {};
+
+async function loadTheoryFiles(tab) {
+  const host = document.getElementById("theory-files-content");
+  if (!host) return;
+  host.innerHTML = `<p class="leaderboard-empty">Завантаження...</p>`;
+
+  if (!theoryFilesCache[tab]) {
+    const folder = THEORY_FILES_FOLDERS[tab];
+    const { data, error } = await supabaseClient
+      .storage
+      .from(THEORY_FILES_BUCKET)
+      .list(folder, { sortBy: { column: "name", order: "asc" } });
+
+    if (error) {
+      host.innerHTML = `<p class="leaderboard-empty">Помилка завантаження файлів: ${error.message}</p>`;
+      return;
+    }
+
+    // Supabase Storage повертає й "заглушку" .emptyFolderPlaceholder для порожніх папок — прибираємо її.
+    theoryFilesCache[tab] = (data || []).filter(f => f.name && f.name !== ".emptyFolderPlaceholder");
+  }
+
+  const files = theoryFilesCache[tab];
+  if (!files.length) {
+    host.innerHTML = `<p class="leaderboard-empty">Файлів у цьому розділі поки немає.</p>`;
+    return;
+  }
+
+  const folder = THEORY_FILES_FOLDERS[tab];
+  host.innerHTML = `
+    <div class="theory-files-list">
+      ${files.map(f => {
+        const path = `${folder}/${f.name}`;
+        const { data: urlData } = supabaseClient.storage.from(THEORY_FILES_BUCKET).getPublicUrl(path);
+        const sizeLabel = formatFileSize(f.metadata && f.metadata.size);
+        return `
+          <div class="theory-file-row">
+            <div class="theory-file-info">
+              <span class="theory-file-name">${escapeHtml(f.name)}</span>
+              ${sizeLabel ? `<span class="theory-file-size">${sizeLabel}</span>` : ""}
+            </div>
+            <a class="secondary-btn theory-file-download-btn" href="${urlData.publicUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(f.name)}">Скачати</a>
+          </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function formatFileSize(bytes) {
+  if (!bytes || isNaN(bytes)) return "";
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(0)} КБ`;
+  return `${(kb / 1024).toFixed(1)} МБ`;
+}
 
 window.addEventListener("DOMContentLoaded", async () => {
   setAuthMode("login");
