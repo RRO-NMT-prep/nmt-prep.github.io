@@ -2046,15 +2046,13 @@ document.querySelectorAll(".theory-tab-btn").forEach(btn => {
 });
 
 /* ---------------------------------------------------------------------
-   ФАЙЛИ АРХІВУ ТЕОРІЇ (Supabase Storage, bucket "materials")
-   Структура бакета: materials/math/*, materials/ukrainian/*, materials/history/*
+   ФАЙЛИ АРХІВУ ТЕОРІЇ
+   Список файлів береться з таблиці theory.materials (там зберігається
+   і "красива" назва для користувача, і реальний шлях у Storage —
+   бакет "materials"). Це дозволяє показувати назви кирилицею навіть
+   попри те, що самі файли на диску мають безпечні латинські імена.
    --------------------------------------------------------------------- */
 const THEORY_FILES_BUCKET = "materials";
-const THEORY_FILES_FOLDERS = {
-  math: "math",
-  ukrainian: "ukrainian",
-  history: "history"
-};
 
 let theoryFilesCache = {};
 
@@ -2064,19 +2062,18 @@ async function loadTheoryFiles(tab) {
   host.innerHTML = `<p class="leaderboard-empty">Завантаження...</p>`;
 
   if (!theoryFilesCache[tab]) {
-    const folder = THEORY_FILES_FOLDERS[tab];
     const { data, error } = await supabaseClient
-      .storage
-      .from(THEORY_FILES_BUCKET)
-      .list(folder, { sortBy: { column: "name", order: "asc" } });
+      .schema("theory")
+      .from("materials")
+      .select("*")
+      .eq("tab", tab)
+      .order("sort_order", { ascending: true });
 
     if (error) {
       host.innerHTML = `<p class="leaderboard-empty">Помилка завантаження файлів: ${error.message}</p>`;
       return;
     }
-
-    // Supabase Storage повертає й "заглушку" .emptyFolderPlaceholder для порожніх папок — прибираємо її.
-    theoryFilesCache[tab] = (data || []).filter(f => f.name && f.name !== ".emptyFolderPlaceholder");
+    theoryFilesCache[tab] = data || [];
   }
 
   const files = theoryFilesCache[tab];
@@ -2085,30 +2082,19 @@ async function loadTheoryFiles(tab) {
     return;
   }
 
-  const folder = THEORY_FILES_FOLDERS[tab];
   host.innerHTML = `
     <div class="theory-files-list">
       ${files.map(f => {
-        const path = `${folder}/${f.name}`;
-        const { data: urlData } = supabaseClient.storage.from(THEORY_FILES_BUCKET).getPublicUrl(path);
-        const sizeLabel = formatFileSize(f.metadata && f.metadata.size);
+        const { data: urlData } = supabaseClient.storage.from(THEORY_FILES_BUCKET).getPublicUrl(f.storage_path);
         return `
           <div class="theory-file-row">
             <div class="theory-file-info">
-              <span class="theory-file-name">${escapeHtml(f.name)}</span>
-              ${sizeLabel ? `<span class="theory-file-size">${sizeLabel}</span>` : ""}
+              <span class="theory-file-name">${escapeHtml(f.display_name)}</span>
             </div>
-            <a class="secondary-btn theory-file-download-btn" href="${urlData.publicUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(f.name)}">Скачати</a>
+            <a class="secondary-btn theory-file-download-btn" href="${urlData.publicUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(f.display_name)}">Скачати</a>
           </div>`;
       }).join("")}
     </div>`;
-}
-
-function formatFileSize(bytes) {
-  if (!bytes || isNaN(bytes)) return "";
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(0)} КБ`;
-  return `${(kb / 1024).toFixed(1)} МБ`;
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
