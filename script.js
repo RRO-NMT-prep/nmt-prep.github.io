@@ -200,6 +200,15 @@ finishSetupBtn.addEventListener("click", async () => {
   }
 });
 
+/* Текст-заглушка замість бала, коли ${subject}_score дорівнює null:
+   - якщо в history вже є хоч одна спроба пробного тесту — бал не
+     зарахований через поріг ("Не склали за балами");
+   - якщо спроб ще не було — тест просто ще не писали. */
+function getScoreStatusText(subject) {
+  const hist = currentProfile[`${subject}_history`] || [];
+  return hist.length > 0 ? "Не склали за балами" : "Ще не складали";
+}
+
 /* ---------------------------------------------------------------------
    ГОЛОВНА СТОРІНКА ТА РЕНДЕР
    --------------------------------------------------------------------- */
@@ -218,7 +227,7 @@ function renderDashboard() {
   ["math", "ukrainian", "history"].forEach(subj => {
     const score = currentProfile[`${subj}_score`];
     document.getElementById(`score-${subj}`).textContent = score ?? "—";
-    document.getElementById(`range-${subj}`).textContent = score ? `Шкала: 100–200 · максимум: ${SUBJECTS_META[subj].max}` : "Ще не складали";
+    document.getElementById(`range-${subj}`).textContent = score ? `Шкала: 100–200 · максимум: ${SUBJECTS_META[subj].max}` : getScoreStatusText(subj);
   });
 
   renderPriorities();
@@ -248,10 +257,11 @@ function renderAnalytics() {
     const c = currentProfile[`${subject}_correct`] || 0;
     document.getElementById(`an-${subject}-questions`).textContent = q;
     document.getElementById(`an-${subject}-accuracy`).textContent = q > 0 ? `${Math.round((c / q) * 100)}%` : "0%";
-    document.getElementById(`an-table-${subject}`).textContent = currentProfile[`${subject}_score`] ?? "Ще не складали";
+    document.getElementById(`an-table-${subject}`).textContent = currentProfile[`${subject}_score`] ?? getScoreStatusText(subject);
   });
   renderAnalyticsChart();
 }
+
 
 function renderAnalyticsChart() {
   const svg = document.getElementById("analytics-chart");
@@ -906,7 +916,7 @@ function renderCompletedAnalytics() {
   const rawEl = document.getElementById("result-raw-score-line");
   if (scoreEl) {
     scoreEl.textContent = data.mode === "test"
-      ? (data.nmtScore != null ? `${data.nmtScore} / 200` : "Ще не складали")
+      ? (data.nmtScore != null ? `${data.nmtScore} / 200` : "Не склали за балами")
       : "—";
   }
   if (rawEl) {
