@@ -248,7 +248,7 @@ function renderAnalytics() {
     const c = currentProfile[`${subject}_correct`] || 0;
     document.getElementById(`an-${subject}-questions`).textContent = q;
     document.getElementById(`an-${subject}-accuracy`).textContent = q > 0 ? `${Math.round((c / q) * 100)}%` : "0%";
-    document.getElementById(`an-table-${subject}`).textContent = currentProfile[`${subject}_score`] ?? "—";
+    document.getElementById(`an-table-${subject}`).textContent = currentProfile[`${subject}_score`] ?? "Ще не складали";
   });
   renderAnalyticsChart();
 }
@@ -905,7 +905,9 @@ function renderCompletedAnalytics() {
   const scoreEl = document.getElementById("result-nmt-score");
   const rawEl = document.getElementById("result-raw-score-line");
   if (scoreEl) {
-    scoreEl.textContent = data.mode === "test" && data.nmtScore != null ? `${data.nmtScore} / 200` : "—";
+    scoreEl.textContent = data.mode === "test"
+      ? (data.nmtScore != null ? `${data.nmtScore} / 200` : "Ще не складали")
+      : "—";
   }
   if (rawEl) {
     rawEl.textContent = data.mode === "test" && data.rawScore != null
