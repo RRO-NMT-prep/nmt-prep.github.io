@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://rro-nmt-prep.github.io/nmt-prep.github.io/sitemap.xml
