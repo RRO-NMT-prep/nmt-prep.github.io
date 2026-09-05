@@ -355,6 +355,32 @@ const modalOverlay = document.getElementById("modal-overlay");
 const modalContent = document.getElementById("modal-content");
 function openModal(html) { modalContent.innerHTML = html; modalOverlay.classList.add("active"); }
 function closeModal() { modalOverlay.classList.remove("active"); }
+
+/* ---------------------------------------------------------------------
+   ОВЕРЛЕЙ ЗАВАНТАЖЕННЯ (окреме вікно поверх усього, показується під час
+   формування сесії/тесту, поки йдуть запити до Supabase)
+   --------------------------------------------------------------------- */
+function showLoadingOverlay(text) {
+  let overlay = document.getElementById("loading-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "loading-overlay";
+    overlay.className = "loading-overlay";
+    overlay.innerHTML = `
+      <div class="loading-overlay-box">
+        <div class="loading-spinner"></div>
+        <p class="loading-overlay-text" id="loading-overlay-text"></p>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+  document.getElementById("loading-overlay-text").textContent = text || "Зачекайте, завантажуємо питання, це може зайняти трохи часу...";
+  overlay.classList.add("active");
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById("loading-overlay");
+  if (overlay) overlay.classList.remove("active");
+}
 document.getElementById("modal-close").addEventListener("click", closeModal);
 modalOverlay.addEventListener("click", (e) => { if (e.target === modalOverlay) closeModal(); });
 
@@ -599,7 +625,8 @@ async function fetchTopicQuestions(subject, topicKey) {
     .from("questions")
     .select("*")
     .eq("subject", subject)
-    .eq("topic", topicKey);
+    .eq("topic", topicKey)
+    .eq("active", "yes");
 
   if (!universal.error && universal.data && universal.data.length) {
     return universal.data.map(row => normalizeQuestion(row, subject, topicKey));
@@ -610,10 +637,12 @@ async function fetchTopicQuestions(subject, topicKey) {
 
   // 2. Формат, який уже є у користувача: math.equations_inequalities,
   // ukrainian.syntax, history.kyivan_rus тощо.
+  // Беремо тільки питання, позначені як активні (active = 'yes').
   const direct = await supabaseClient
     .schema(subject)
     .from(topicKey)
-    .select("*");
+    .select("*")
+    .eq("active", "yes");
 
   if (direct.error) {
     console.warn(`Не вдалося прочитати ${subject}.${topicKey}:`, direct.error.message);
@@ -1031,7 +1060,9 @@ function openSessionSetup() {
     }));
     const status = document.getElementById("modal-status");
     status.textContent = "Завантажую питання з таблиць...";
+    showLoadingOverlay("Зачекайте, завантажуємо питання, це може зайняти трохи часу...");
     const questions = await loadQuestionsForPlan(select.value, plan);
+    hideLoadingOverlay();
     if (!questions.length) {
       status.textContent = lastFetchErrors.length
         ? `Помилка доступу до таблиць: ${lastFetchErrors.join(" | ")}. Найімовірніше схему потрібно додати в "Exposed schemas" у Supabase (Project Settings → Data API) та перевірити RLS.`
@@ -1074,7 +1105,9 @@ function openTrialTestSetup() {
     const subject = document.getElementById("modal-test-subject").value;
     const status = document.getElementById("modal-status");
     status.textContent = "Формую тест з усіх доступних таблиць...";
+    showLoadingOverlay("Зачекайте, завантажуємо питання, це може зайняти трохи часу...");
     const questions = await loadNmtQuestions(subject);
+    hideLoadingOverlay();
     if (!questions.length) {
       status.textContent = lastFetchErrors.length
         ? `Помилка доступу до таблиць: ${lastFetchErrors.join(" | ")}. Найімовірніше схему потрібно додати в "Exposed schemas" у Supabase (Project Settings → Data API) та перевірити RLS.`
