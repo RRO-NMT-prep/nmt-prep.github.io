@@ -2677,14 +2677,15 @@ html, body {
   border-radius: 50%;
   border: 2px solid var(--border-color);
   background: var(--bg-panel-alt);
-  font-size: 20px;
-  line-height: 1;
+  padding: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
+.avatar-preset-btn img { width: 100%; height: 100%; object-fit: cover; }
 .avatar-preset-btn:hover { transform: scale(1.08); }
 .avatar-preset-btn.active {
   border-color: var(--accent);

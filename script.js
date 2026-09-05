@@ -149,6 +149,7 @@ async function checkAndLoadProfile() {
     showScreen("screen-dashboard");
   } else {
     showScreen("screen-setup");
+    loadAvatarPresets();
   }
 }
 
@@ -167,7 +168,21 @@ const finishSetupBtn = document.getElementById("finish-setup-btn");
 let selectedAvatar = null;
 
 document.getElementById("random-quote-btn").addEventListener("click", () => {
-  const QUOTES = ["Знання — це зброя.", "Маленькі кроки щодня ведуть до великого успіху.", "Дисципліна б'є талант."];
+  const QUOTES = [
+    "Знання — це зброя.",
+    "Маленькі кроки щодня ведуть до великого успіху.",
+    "Дисципліна б'є талант.",
+    "Здати НМТ на 200 балів!",
+    "Ще один тест — ще один крок до мрії.",
+    "Кава, конспекти і трохи магії.",
+    "Вчора не знав, сьогодні вже вмію.",
+    "Йду на золоту медаль.",
+    "Сон — це для слабких (жартую, сплю 8 годин).",
+    "200 балів не самі себе наберуть.",
+    "Мій мозок — це вже маленька енциклопедія.",
+    "Просто студент, який хоче вступити на бюджет.",
+    "НМТ мене боїться більше, ніж я його."
+  ];
   descriptionInput.value = QUOTES[Math.floor(Math.random() * QUOTES.length)];
 });
 
@@ -185,19 +200,53 @@ avatarInput.addEventListener("change", (e) => {
   reader.readAsDataURL(file);
 });
 
-document.querySelectorAll(".avatar-preset-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".avatar-preset-btn").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    const emoji = btn.dataset.emoji;
-    selectedAvatar = `emoji:${emoji}`;
-    avatarImg.style.display = "none";
-    avatarImg.src = "";
-    avatarPlaceholder.textContent = emoji;
-    avatarPlaceholder.style.display = "block";
-    avatarInput.value = "";
+/* ---------------------------------------------------------------------
+   ГОТОВІ АВАТАРКИ З SUPABASE STORAGE (бакет "avatars")
+   --------------------------------------------------------------------- */
+const AVATAR_PRESETS_BUCKET = "avatars";
+let avatarPresetsLoaded = false;
+
+async function loadAvatarPresets() {
+  const grid = document.getElementById("avatar-preset-grid");
+  if (!grid || avatarPresetsLoaded) return;
+
+  const { data, error } = await supabaseClient
+    .storage
+    .from(AVATAR_PRESETS_BUCKET)
+    .list("", { sortBy: { column: "name", order: "asc" } });
+
+  if (error) {
+    grid.innerHTML = `<p class="leaderboard-empty">Не вдалося завантажити аватарки: ${error.message}</p>`;
+    return;
+  }
+
+  const files = (data || []).filter(f => f.name && f.name !== ".emptyFolderPlaceholder");
+  if (!files.length) {
+    grid.innerHTML = `<p class="leaderboard-empty">Готових аватарок поки немає.</p>`;
+    return;
+  }
+
+  avatarPresetsLoaded = true;
+  grid.innerHTML = files.map(f => {
+    const { data: urlData } = supabaseClient.storage.from(AVATAR_PRESETS_BUCKET).getPublicUrl(f.name);
+    return `<button type="button" class="avatar-preset-btn" data-url="${urlData.publicUrl}">
+        <img src="${urlData.publicUrl}" alt="">
+      </button>`;
+  }).join("");
+
+  document.querySelectorAll(".avatar-preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".avatar-preset-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const url = btn.dataset.url;
+      selectedAvatar = url;
+      avatarImg.src = url;
+      avatarImg.style.display = "block";
+      avatarPlaceholder.style.display = "none";
+      avatarInput.value = "";
+    });
   });
-});
+}
 
 finishSetupBtn.addEventListener("click", async () => {
   const nickname = nicknameInput.value.trim();
