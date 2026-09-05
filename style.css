@@ -2351,6 +2351,7 @@ html, body {
   display:flex !important; align-items:center !important; justify-content:center !important;
   background:var(--bg-panel-alt) !important; border:1px dashed var(--border-color) !important;
 }
+#view-profile #profile-avatar-placeholder { font-size: 32px !important; padding: 0 !important; }
 #view-profile .profile-info-box { min-width:0 !important; }
 #view-profile .profile-info-box h2 { margin:0 0 5px !important; font-size:18px !important; }
 #view-profile .profile-desc { margin:0 0 10px !important; font-size:10px !important; color:var(--text-muted) !important; }
@@ -2641,7 +2642,7 @@ html, body {
   overflow: hidden;
 }
 .setup-avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
-#avatar-placeholder { font-size: 30px; color: var(--text-muted); }
+#avatar-placeholder { font-size: 36px; color: var(--text-muted); }
 
 .setup-file-label {
   background: var(--accent-soft);
@@ -2655,6 +2656,40 @@ html, body {
   transition: background 0.2s ease;
 }
 .setup-file-label:hover { background: rgba(139, 92, 246, 0.28); }
+
+.setup-avatar-or {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.avatar-preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 280px;
+}
+
+.avatar-preset-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  background: var(--bg-panel-alt);
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.avatar-preset-btn:hover { transform: scale(1.08); }
+.avatar-preset-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
 
 .setup-quote-row {
   display: flex;

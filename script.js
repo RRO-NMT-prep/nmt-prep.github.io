@@ -162,6 +162,10 @@ const nicknameInput = document.getElementById("nickname-input");
 const descriptionInput = document.getElementById("description-input");
 const finishSetupBtn = document.getElementById("finish-setup-btn");
 
+// Обране значення аватарки: або "emoji:🦉" (готова аватарка),
+// або справжній data-URL завантаженого фото.
+let selectedAvatar = null;
+
 document.getElementById("random-quote-btn").addEventListener("click", () => {
   const QUOTES = ["Знання — це зброя.", "Маленькі кроки щодня ведуть до великого успіху.", "Дисципліна б'є талант."];
   descriptionInput.value = QUOTES[Math.floor(Math.random() * QUOTES.length)];
@@ -175,8 +179,24 @@ avatarInput.addEventListener("change", (e) => {
     avatarImg.src = event.target.result;
     avatarImg.style.display = "block";
     avatarPlaceholder.style.display = "none";
+    selectedAvatar = event.target.result;
+    document.querySelectorAll(".avatar-preset-btn").forEach(b => b.classList.remove("active"));
   };
   reader.readAsDataURL(file);
+});
+
+document.querySelectorAll(".avatar-preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".avatar-preset-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    const emoji = btn.dataset.emoji;
+    selectedAvatar = `emoji:${emoji}`;
+    avatarImg.style.display = "none";
+    avatarImg.src = "";
+    avatarPlaceholder.textContent = emoji;
+    avatarPlaceholder.style.display = "block";
+    avatarInput.value = "";
+  });
 });
 
 finishSetupBtn.addEventListener("click", async () => {
@@ -186,7 +206,7 @@ finishSetupBtn.addEventListener("click", async () => {
 
   try {
     const { data, error } = await supabaseClient
-      .from('profiles').insert([{ id: currentUser.id, nickname: nickname, description: descriptionInput.value.trim(), xp: 0, level: 1 }])
+      .from('profiles').insert([{ id: currentUser.id, nickname: nickname, description: descriptionInput.value.trim(), avatar: selectedAvatar, xp: 0, level: 1 }])
       .select().single();
     if (error) throw error;
     currentProfile = data;
@@ -296,10 +316,25 @@ function renderProfileView() {
   document.getElementById("profile-questions").textContent = `${(currentProfile.math_questions || 0) + (currentProfile.ukrainian_questions || 0) + (currentProfile.history_questions || 0)} питань`;
   document.getElementById("profile-nickname").textContent = currentProfile.nickname || "—";
   document.getElementById("profile-description").textContent = currentProfile.description || "Опис відсутній";
-  if (currentProfile.avatar) {
-    document.getElementById("profile-avatar-img").src = currentProfile.avatar;
-    document.getElementById("profile-avatar-img").style.display = "block";
-    document.getElementById("profile-avatar-placeholder").style.display = "none";
+
+  const imgEl = document.getElementById("profile-avatar-img");
+  const placeholderEl = document.getElementById("profile-avatar-placeholder");
+  const avatar = currentProfile.avatar;
+
+  if (avatar && avatar.startsWith("emoji:")) {
+    imgEl.style.display = "none";
+    imgEl.src = "";
+    placeholderEl.textContent = avatar.replace("emoji:", "");
+    placeholderEl.style.display = "block";
+  } else if (avatar) {
+    imgEl.src = avatar;
+    imgEl.style.display = "block";
+    placeholderEl.style.display = "none";
+  } else {
+    imgEl.style.display = "none";
+    imgEl.src = "";
+    placeholderEl.textContent = "?";
+    placeholderEl.style.display = "block";
   }
 }
 
