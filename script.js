@@ -163,6 +163,11 @@ const nicknameInput = document.getElementById("nickname-input");
 const descriptionInput = document.getElementById("description-input");
 const finishSetupBtn = document.getElementById("finish-setup-btn");
 
+nicknameInput.addEventListener("input", () => {
+  nicknameInput.style.borderColor = "";
+  document.getElementById("nickname-error").style.display = "none";
+});
+
 // Обране значення аватарки: або "emoji:🦉" (готова аватарка),
 // або справжній data-URL завантаженого фото.
 let selectedAvatar = null;
@@ -250,10 +255,31 @@ async function loadAvatarPresets() {
 
 finishSetupBtn.addEventListener("click", async () => {
   const nickname = nicknameInput.value.trim();
+  const nicknameErrorEl = document.getElementById("nickname-error");
+  nicknameErrorEl.style.display = "none";
+  nicknameInput.style.borderColor = "";
+
   if (!nickname) { nicknameInput.focus(); nicknameInput.style.borderColor = "#f87171"; return; }
+
   finishSetupBtn.disabled = true;
 
   try {
+    // Перевіряємо, чи нікнейм уже зайнятий (без урахування регістру).
+    const { data: existing, error: checkError } = await supabaseClient
+      .from('profiles')
+      .select('id')
+      .ilike('nickname', nickname)
+      .maybeSingle();
+
+    if (checkError) throw checkError;
+
+    if (existing) {
+      nicknameInput.style.borderColor = "#f87171";
+      nicknameErrorEl.style.display = "block";
+      nicknameInput.focus();
+      return;
+    }
+
     const { data, error } = await supabaseClient
       .from('profiles').insert([{ id: currentUser.id, nickname: nickname, description: descriptionInput.value.trim(), avatar: selectedAvatar, xp: 0, level: 1 }])
       .select().single();
@@ -263,7 +289,14 @@ finishSetupBtn.addEventListener("click", async () => {
     renderDashboard();
     showScreen("screen-dashboard");
   } catch (err) {
-    alert("Помилка збереження: " + err.message);
+    // 23505 — порушення унікальності на рівні бази (напр. одночасна реєстрація).
+    if (err.code === "23505") {
+      nicknameInput.style.borderColor = "#f87171";
+      nicknameErrorEl.style.display = "block";
+      nicknameInput.focus();
+    } else {
+      alert("Помилка збереження: " + err.message);
+    }
   } finally {
     finishSetupBtn.disabled = false;
   }
@@ -388,6 +421,16 @@ function renderProfileView() {
 }
 
 let leaderboardFilter = "questions", leaderboardCache = null;
+function avatarHtml(avatar, sizeClass) {
+  if (avatar && avatar.startsWith("emoji:")) {
+    return `<div class="${sizeClass}"><span>${avatar.replace("emoji:", "")}</span></div>`;
+  }
+  if (avatar) {
+    return `<div class="${sizeClass}"><img src="${avatar}" alt=""></div>`;
+  }
+  return `<div class="${sizeClass}"><span>?</span></div>`;
+}
+
 async function loadLeaderboard() {
   const listEl = document.getElementById("leaderboard-list");
   if (!leaderboardCache) {
@@ -417,6 +460,7 @@ async function loadLeaderboard() {
     return `
     <div class="leaderboard-row">
       <span class="leaderboard-rank">${i + 1}</span>
+      ${avatarHtml(r.avatar, "leaderboard-avatar")}
       <span class="leaderboard-name">${r.nickname || "Анонім"}</span>
       <span class="leaderboard-value">${displayValue}${suffix}</span>
     </div>`;
