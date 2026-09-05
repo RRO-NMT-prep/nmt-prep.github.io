@@ -269,11 +269,11 @@ finishSetupBtn.addEventListener("click", async () => {
       .from('profiles')
       .select('id')
       .ilike('nickname', nickname)
-      .maybeSingle();
+      .limit(1);
 
     if (checkError) throw checkError;
 
-    if (existing) {
+    if (existing && existing.length > 0) {
       nicknameInput.style.borderColor = "#f87171";
       nicknameErrorEl.style.display = "block";
       nicknameInput.focus();
