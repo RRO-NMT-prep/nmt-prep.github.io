@@ -188,6 +188,15 @@ html, body {
 }
 .secondary-btn:hover { background: rgba(139, 92, 246, 0.28); }
 
+.danger-btn {
+  align-self: flex-start;
+  background: rgba(248, 113, 113, 0.12);
+  color: #f87171;
+  border-color: #f87171;
+}
+.danger-btn:hover { background: rgba(248, 113, 113, 0.24); }
+.danger-btn:disabled { opacity: 0.6; cursor: default; }
+
 .primary-btn {
   width: 100%;
   margin-top: 26px;

@@ -2278,3 +2278,36 @@ window.addEventListener("DOMContentLoaded", async () => {
     await checkAndLoadProfile();
   }
 });
+
+/* ---------------------------------------------------------------------
+   ВИХІД З АКАУНТА
+   Завершує поточну сесію (auth.signOut) і повертає на екран логіну.
+   Сам акаунт і всі дані користувача в базі НЕ видаляються — при
+   наступному вході все буде на місці.
+   --------------------------------------------------------------------- */
+document.getElementById("logout-btn").addEventListener("click", async () => {
+  const btn = document.getElementById("logout-btn");
+  btn.disabled = true;
+  try {
+    await supabaseClient.auth.signOut();
+  } catch (err) {
+    console.warn("Помилка виходу:", err.message);
+  }
+
+  // Скидаємо локальний стан і кеші, щоб дані попереднього користувача
+  // не "просвічували" при наступному вході в іншому акаунті.
+  currentUser = null;
+  currentProfile = null;
+  leaderboardCache = null;
+  theoryCache = {};
+  theoryFilesCache = {};
+  avatarPresetsLoaded = false;
+  selectedAvatar = null;
+
+  emailInput.value = "";
+  passwordInput.value = "";
+  setAuthMode("login");
+  showScreen("screen-auth");
+
+  btn.disabled = false;
+});
