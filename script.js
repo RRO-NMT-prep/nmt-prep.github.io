@@ -535,6 +535,7 @@ let testStartedAt = null;
 let testRemainingMs = 60 * 60 * 1000;
 let testTimerInterval = null;
 let completedAnalytics = null;
+let reviewMode = false; // Режим перегляду рішення після завершення сесії/тесту.
 
 const NMT_COUNTS = { math: 22, ukrainian: 30, history: 30 };
 
@@ -1023,21 +1024,32 @@ function buildCompletedAnalytics(mode, subject) {
   const totalQuestions = activeQuestions.length;
   const correct = tallyResults();
 
-  // Временная аналитика показывается ТОЛЬКО для правильных ответов.
-  const questions = activeQuestions
-    .map((q, i) => ({ q, i, answer: questionAnswers[i] }))
-    .filter(({ answer }) => !!(answer && answer.correct))
-    .map(({ q, i }) => ({
+  // У результатах зберігаємо ВСІ питання: правильні, неправильні та без відповіді.
+  // Це потрібно для можливості відкрити конкретне питання в режимі розбору.
+  const questions = activeQuestions.map((q, i) => {
+    const answer = questionAnswers[i] || null;
+    const isAnswered = !!answer && (
+      (answer.type === "single" && Number.isInteger(answer.selectedIndex)) ||
+      (answer.type === "multiple" && Array.isArray(answer.selectedIndices) && answer.selectedIndices.length > 0) ||
+      (answer.type === "short" && String(answer.value || "").trim() !== "") ||
+      (answer.type === "table" && String(answer.value || "").trim() !== "") ||
+      (answer.type === "matching" && answer.selections && Object.values(answer.selections).some(Boolean))
+    );
+    const isCorrect = !!(answer && answer.correct);
+    return {
       number: i + 1,
       topic: q.topic,
       questionType: q.question_type,
       timeMs: Math.max(0, Math.round(questionElapsedMs[i] || 0)),
       limitSec: getRecommendedSeconds(subject, i + 1, q),
-      correct: true
-    }));
+      correct: isCorrect,
+      answered: isAnswered
+    };
+  });
 
-  const totalTime = questions.reduce((sum, item) => sum + item.timeMs, 0);
-  const averageMs = questions.length ? totalTime / questions.length : 0;
+  const timedQuestions = questions.filter(item => item.correct);
+  const totalTime = timedQuestions.reduce((sum, item) => sum + item.timeMs, 0);
+  const averageMs = timedQuestions.length ? totalTime / timedQuestions.length : 0;
 
   return {
     mode,
@@ -1045,7 +1057,7 @@ function buildCompletedAnalytics(mode, subject) {
     totalQuestions,
     correct,
     accuracy: totalQuestions ? Math.round((correct / totalQuestions) * 100) : 0,
-    timedQuestionsCount: questions.length,
+    timedQuestionsCount: timedQuestions.length,
     averageMs,
     totalTime,
     overallLimitMs: mode === "test" ? 60 * 60 * 1000 : null,
@@ -1059,7 +1071,7 @@ function renderCompletedAnalytics() {
   const data = completedAnalytics;
   document.getElementById("result-mode-badge").textContent = data.mode === "test" ? "Пробний тест" : "Навчальна сесія";
   document.getElementById("result-subtitle").textContent =
-    `${SUBJECTS_META[data.subject]?.label || data.subject} · деталізація темпу по кожному питанню`;
+    `${SUBJECTS_META[data.subject]?.label || data.subject} · правильні й неправильні відповіді можна переглянути окремо`;
 
   document.getElementById("result-accuracy").textContent = `${data.accuracy}%`;
   document.getElementById("result-score-line").textContent = `${data.correct} з ${data.totalQuestions} правильних`;
@@ -1087,40 +1099,73 @@ function renderCompletedAnalytics() {
 
   const host = document.getElementById("result-questions-list");
   if (!data.questions.length) {
-    host.innerHTML = `<div class="result-no-time">⏱️ Часова аналітика відсутня: у цій спробі немає правильних відповідей.</div>`;
+    host.innerHTML = `<div class="result-no-time">У цій спробі немає питань для перегляду.</div>`;
     showScreen("screen-result");
     return;
   }
+
   host.innerHTML = data.questions.map(item => {
     const limitMs = item.limitSec * 1000;
     const ratio = limitMs > 0 ? item.timeMs / limitMs : 0;
     const fillPct = Math.min(100, Math.round(ratio * 100));
-    const good = item.timeMs <= limitMs;
-    const status = good ? "Відмінно, ти легенда! 🔥" : "дуже повільно!!(((";
-    const statusClass = good ? "good" : "slow";
+    const goodTime = item.timeMs <= limitMs || item.timeMs === 0;
+    const timeStatusClass = goodTime ? "good" : "slow";
+
+    let status = "Без відповіді";
+    let statusClass = "unanswered";
+    if (item.answered && item.correct) {
+      status = "Правильно";
+      statusClass = "correct";
+    } else if (item.answered) {
+      status = "Неправильно";
+      statusClass = "incorrect";
+    }
 
     return `
-      <div class="result-question-row">
+      <div class="result-question-row ${statusClass}">
         <div class="result-q-meta">
           <div>
             <strong>Питання ${item.number}</strong>
             <span class="result-q-topic">${escapeHtml(topicLabel(data.subject, item.topic))}</span>
           </div>
-          <div class="result-q-time">${formatTime(item.timeMs)}</div>
+          <span class="result-q-status ${statusClass}">${status}</span>
         </div>
-        <div class="result-scale">
-          <div class="result-scale-fill ${statusClass}" style="width:${fillPct}%"></div>
+        <div class="result-scale result-time-scale">
+          <div class="result-scale-fill ${timeStatusClass}" style="width:${fillPct}%"></div>
           <span class="result-scale-limit">Рекомендовано: ${formatTime(limitMs)}</span>
         </div>
         <div class="result-q-footer">
-          <span class="result-q-status ${statusClass}">${status}</span>
-          <span class="result-q-limit-note">Рекомендовано: ${formatTime(limitMs)}</span>
+          <span class="result-q-time">${item.timeMs ? formatTime(item.timeMs) : "—"}</span>
+          <span class="result-q-limit-note">${item.timeMs ? (goodTime ? "Темп у нормі" : "Повільніше за рекомендацію") : "Час не зафіксовано"}</span>
+          <button type="button" class="secondary-btn result-review-btn" data-review-index="${item.number - 1}">Увидеть решение</button>
         </div>
       </div>
     `;
   }).join("");
 
+  host.querySelectorAll(".result-review-btn").forEach(btn => {
+    btn.addEventListener("click", () => openQuestionReview(Number(btn.dataset.reviewIndex)));
+  });
+
   showScreen("screen-result");
+}
+
+function openQuestionReview(index) {
+  if (!Array.isArray(activeQuestions) || !activeQuestions.length) return;
+  const safeIndex = Math.max(0, Math.min(Number(index) || 0, activeQuestions.length - 1));
+  reviewMode = true;
+  activeMode = "session";
+  currentQuestionIndex = safeIndex;
+  stopAllTimers();
+  renderQuestion("session");
+  showScreen("screen-session");
+}
+
+function exitQuestionReview() {
+  reviewMode = false;
+  stopAllTimers();
+  if (completedAnalytics) renderCompletedAnalytics();
+  else showScreen("screen-dashboard");
 }
 
 function openSessionSetup() {
@@ -1342,14 +1387,24 @@ function resolveQuestionImageSrc(value, subject) {
 
 function renderQuestion(mode) {
   const q = activeQuestions[currentQuestionIndex];
+  if (!q) return;
+
   const prefix = mode === "test" ? "test" : "session";
   const total = activeQuestions.length;
   const progress = ((currentQuestionIndex + 1) / total) * 100;
+  const isReview = reviewMode && mode === "session";
+
   document.getElementById(`${prefix}-progress-label`).textContent = `Питання ${currentQuestionIndex + 1} з ${total}`;
   document.getElementById(`${prefix}-progress-fill`).style.width = `${progress}%`;
   if (mode === "test") renderTestNav();
-  startQuestionTimer();
-  document.getElementById(`${prefix}-topic-label`).textContent = mode === "test" ? topicLabel(activeSubject, q.topic) : topicLabel(activeSubject, q.topic);
+
+  if (isReview) {
+    stopQuestionTimer();
+    const reviewTimer = document.getElementById("session-question-timer");
+    if (reviewTimer) reviewTimer.textContent = "Розбір";
+  } else startQuestionTimer();
+
+  document.getElementById(`${prefix}-topic-label`).textContent = topicLabel(activeSubject, q.topic);
   document.getElementById(`${prefix}-question-text`).innerHTML = escapeHtml(q.question_text).replace(/\n/g, "<br>");
 
   const image = document.getElementById(`${prefix}-image`);
@@ -1364,68 +1419,79 @@ function renderQuestion(mode) {
 
   if (mode === "session") {
     const hints = document.getElementById("session-hints");
+    const hintImagesHost = document.getElementById("session-hint-images");
     hints.innerHTML = "";
-    const hintTexts = [q.hint1, q.hint2, q.hint3].filter(t => t != null && String(t).trim() !== "");
+    if (hintImagesHost) hintImagesHost.innerHTML = "";
 
+    const hintTexts = [q.hint1, q.hint2, q.hint3].filter(t => t != null && String(t).trim() !== "");
     if (hintTexts.length) {
-      hints.innerHTML = `<div id="hint-messages" class="hint-messages"></div><button type="button" class="secondary-btn hint-btn" id="hint-btn">Дай підказку</button>`;
+      const buttonHtml = isReview ? "" : `<button type="button" class="secondary-btn hint-btn" id="hint-btn">Дай підказку</button>`;
+      hints.innerHTML = `<div id="hint-messages" class="hint-messages"></div>${buttonHtml}`;
       const messagesEl = document.getElementById("hint-messages");
       const btn = document.getElementById("hint-btn");
 
       const renderRevealedHints = () => {
-        const used = hintState[currentQuestionIndex] || 0;
+        const used = isReview ? hintTexts.length : (hintState[currentQuestionIndex] || 0);
         messagesEl.innerHTML = hintTexts.slice(0, used).map((t, i) =>
           `<div class="hint-message"><span class="hint-message-label">Підказка ${i + 1}</span>${escapeHtml(t)}</div>`
         ).join("");
         if (used >= hintTexts.length) {
-          messagesEl.innerHTML += `<div class="hint-message hint-message-end">Підказки закінчились — думай сам 🙂</div>`;
-          btn.disabled = true;
+          messagesEl.innerHTML += `<div class="hint-message hint-message-end">${isReview ? "Підказки відкриті для розбору." : "Підказки закінчились — думай сам 🙂"}</div>`;
+          if (btn) btn.disabled = true;
         }
         renderMathIn(messagesEl);
       };
 
-      btn.addEventListener("click", () => {
-        hintState[currentQuestionIndex] = (hintState[currentQuestionIndex] || 0) + 1;
-        renderRevealedHints();
-      });
+      if (btn) {
+        btn.addEventListener("click", () => {
+          hintState[currentQuestionIndex] = Math.min(hintTexts.length, (hintState[currentQuestionIndex] || 0) + 1);
+          renderRevealedHints();
+        });
+      }
       renderRevealedHints();
     } else {
-      hints.innerHTML = `<div class="hint-messages"><div class="hint-message hint-message-end">Підказок для цього питання ще немає — думай сам 🙂</div></div><button type="button" class="secondary-btn hint-btn" disabled>Дай підказку</button>`;
+      hints.innerHTML = `<div class="hint-messages"><div class="hint-message hint-message-end">Підказок для цього питання ще немає.</div></div>`;
     }
 
-    // Для математики: якщо для питання завантажені фото розв'язання — окрема кнопка-галерея.
-    const imagesHost = document.getElementById("session-hint-images");
-    if (imagesHost) {
-      imagesHost.innerHTML = "";
-      if (activeSubject === "math" && q.solutionImages && q.solutionImages.length) {
-        imagesHost.innerHTML = `<button type="button" class="secondary-btn hint-images-btn" id="hint-images-btn">Показати розв'язання (фото)</button><div id="hint-images-gallery" class="hint-images-gallery" style="display:none;"></div>`;
+    if (hintImagesHost && activeSubject === "math" && q.solutionImages && q.solutionImages.length) {
+      const gallery = q.solutionImages.map((src, i) =>
+        `<a href="${escapeHtml(src)}" target="_blank" rel="noopener"><img src="${escapeHtml(src)}" alt="Розв'язання, крок ${i + 1}"></a>`
+      ).join("");
+      if (isReview) {
+        hintImagesHost.innerHTML = `<div class="hint-images-title">Розв'язання (фото)</div><div class="hint-images-gallery review-images-gallery">${gallery}</div>`;
+      } else {
+        hintImagesHost.innerHTML = `<button type="button" class="secondary-btn hint-images-btn" id="hint-images-btn">Показати розв'язання (фото)</button><div id="hint-images-gallery" class="hint-images-gallery" style="display:none;"></div>`;
         document.getElementById("hint-images-btn").addEventListener("click", () => {
-          const gallery = document.getElementById("hint-images-gallery");
-          const showing = gallery.style.display !== "none";
-          if (showing) { gallery.style.display = "none"; return; }
-          gallery.innerHTML = q.solutionImages.map((src, i) =>
-            `<a href="${escapeHtml(src)}" target="_blank" rel="noopener"><img src="${escapeHtml(src)}" alt="Розв'язання, крок ${i + 1}"></a>`
-          ).join("");
-          gallery.style.display = "flex";
+          const galleryEl = document.getElementById("hint-images-gallery");
+          const showing = galleryEl.style.display !== "none";
+          if (showing) { galleryEl.style.display = "none"; return; }
+          galleryEl.innerHTML = gallery;
+          galleryEl.style.display = "flex";
         });
       }
     }
   }
 
   const savedAnswer = questionAnswers[currentQuestionIndex];
-
-  if (q.question_type === 'matching') renderMatchingQuestion(q, options, mode, savedAnswer);
-  else if (q.question_type === 'short_answer') renderShortAnswerQuestion(q, options, mode, savedAnswer);
-  else if (q.question_type === 'multiple_choice') renderMultipleChoiceQuestion(q, options, mode, savedAnswer);
-  else if (q.question_type === 'table') renderTableQuestion(q, options, mode, savedAnswer);
-  else renderSingleChoiceQuestion(q, options, mode, savedAnswer);
+  if (q.question_type === 'matching') renderMatchingQuestion(q, options, mode, savedAnswer, isReview);
+  else if (q.question_type === 'short_answer') renderShortAnswerQuestion(q, options, mode, savedAnswer, isReview);
+  else if (q.question_type === 'multiple_choice') renderMultipleChoiceQuestion(q, options, mode, savedAnswer, isReview);
+  else if (q.question_type === 'table') renderTableQuestion(q, options, mode, savedAnswer, isReview);
+  else renderSingleChoiceQuestion(q, options, mode, savedAnswer, isReview);
 
   const prevBtn = document.getElementById(`${prefix}-prev-btn`);
   const nextBtn = document.getElementById(`${prefix}-next-btn`);
   const finishBtn = document.getElementById(`${prefix}-finish-btn`);
+  const exitBtn = document.getElementById(`${prefix}-exit-btn`);
+
   if (prevBtn) prevBtn.disabled = currentQuestionIndex === 0;
   if (nextBtn) nextBtn.disabled = currentQuestionIndex >= activeQuestions.length - 1;
-  if (finishBtn) finishBtn.style.display = "block";
+  if (finishBtn) finishBtn.style.display = isReview ? "none" : "block";
+  if (exitBtn && prefix === "session") exitBtn.textContent = isReview ? "До результатів" : "Вийти";
+  const controls = document.querySelector("#screen-session .session-controls");
+  const card = document.querySelector("#screen-session .session-card-main");
+  if (controls) controls.classList.toggle("review-session-controls", isReview);
+  if (card) card.classList.toggle("question-review-card", isReview);
 
   renderMathIn(document.getElementById(`${prefix}-question-text`).closest(".session-card-main"));
 }
@@ -1478,10 +1544,7 @@ function recordAnswer(mode, data) {
   activeQuestionResults[currentQuestionIndex] = !!data.correct;
 }
 
-function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
-  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
-  // відповідь зберігається автоматично при кожному виборі варіанту.
-  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+function renderSingleChoiceQuestion(q, container, mode, savedAnswer, isReview = false) {
   const isTest = mode === "test";
   const letters = OPTION_LETTERS.map(l => l.toUpperCase());
   let selectedIndex = savedAnswer && savedAnswer.type === "single" ? savedAnswer.selectedIndex : null;
@@ -1498,17 +1561,42 @@ function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
     const el = document.createElement("div");
     el.className = "session-option";
     el.innerHTML = `<div class="session-option-letter">${letters[index]}</div><span>${escapeHtml(text)}</span>`;
-    if (selectedIndex === index) el.classList.add("selected");
-    el.addEventListener("click", () => {
-      // Дозволяємо переобирати відповідь будь-яку кількість разів до завершення сесії.
-      // Правильність не підсвічується кольором — лише позначаємо обраний варіант.
-      [...container.children].forEach(c => c.classList.remove("selected"));
+    const isCorrectOption = isSingleChoiceCorrect(q, index, text);
+
+    if (isReview) {
+      el.classList.add("review-option");
+      if (isCorrectOption) el.classList.add("review-correct");
+      if (selectedIndex === index) el.classList.add(isCorrectOption ? "review-selected-correct" : "review-selected-wrong");
+    } else if (selectedIndex === index) {
       el.classList.add("selected");
-      selectedIndex = index;
-      if (isTest) evaluateAndRecord();
-    });
+    }
+
+    if (!isReview) {
+      el.addEventListener("click", () => {
+        [...container.children].forEach(c => c.classList.remove("selected"));
+        el.classList.add("selected");
+        selectedIndex = index;
+        if (isTest) evaluateAndRecord();
+      });
+    }
     container.appendChild(el);
   });
+
+  if (isReview) {
+    const selectedText = selectedIndex != null && q.options[selectedIndex] != null ? q.options[selectedIndex] : "не обрано";
+    const correctIndex = q.options.findIndex((text, index) => isSingleChoiceCorrect(q, index, text));
+    const correctText = correctIndex >= 0 ? q.options[correctIndex] : "Правильну відповідь не визначено";
+    const answerStatus = savedAnswer?.correct ? "Ваша відповідь правильна." : (savedAnswer ? "Ваша відповідь неправильна." : "Ви не обрали відповідь.");
+    container.insertAdjacentHTML("beforeend", `
+      <div class="review-answer-summary ${savedAnswer?.correct ? "review-summary-correct" : "review-summary-wrong"}">
+        <div><strong>Результат:</strong> ${answerStatus}</div>
+        <div><strong>Правильна відповідь:</strong> ${escapeHtml(correctText)}</div>
+        <div><strong>Ваш вибір:</strong> ${escapeHtml(selectedText)}</div>
+      </div>
+    `);
+    renderMathIn(container);
+    return;
+  }
 
   if (isTest) return;
 
@@ -1521,10 +1609,7 @@ function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
   resultEl.id = "single-answer-result";
   container.appendChild(checkBtn);
   container.appendChild(resultEl);
-
-  if (savedAnswer && savedAnswer.type === "single") {
-    resultEl.textContent = savedAnswer.correct ? "Правильно" : "Неправильно";
-  }
+  if (savedAnswer && savedAnswer.type === "single") resultEl.textContent = savedAnswer.correct ? "Правильно" : "Неправильно";
 
   checkBtn.addEventListener("click", () => {
     if (selectedIndex == null) { resultEl.textContent = "Оберіть варіант відповіді."; return; }
@@ -1533,46 +1618,77 @@ function renderSingleChoiceQuestion(q, container, mode, savedAnswer) {
   });
 }
 
-function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
-  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
-  // відповідь зберігається автоматично при кожній зміні вибору.
-  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+function getExpectedMultipleOptionTokens(q) {
+  const rawCorrect = getQuestionCorrect(q);
+  let expectedTokens = [];
+  if (Array.isArray(rawCorrect)) expectedTokens = rawCorrect.map(normalizeOptionToken).filter(Boolean);
+  else if (rawCorrect && Array.isArray(rawCorrect.options)) expectedTokens = rawCorrect.options.map(normalizeOptionToken).filter(Boolean);
+  else if (rawCorrect?.value != null) expectedTokens = String(rawCorrect.value).split(/[,;\s]+/).map(normalizeOptionToken).filter(Boolean);
+  else if (rawCorrect?.option != null) expectedTokens = [normalizeOptionToken(rawCorrect.option)];
+  return [...new Set(expectedTokens)].sort();
+}
+
+function renderMultipleChoiceQuestion(q, container, mode, savedAnswer, isReview = false) {
   const isTest = mode === 'test';
   const letters = OPTION_LETTERS.map(l => l.toUpperCase());
   const saved = savedAnswer && savedAnswer.type === 'multiple' ? (savedAnswer.selectedIndices || []) : [];
-  container.innerHTML = '';
 
   const evaluateAndRecord = () => {
     const selectedIndices = [...container.querySelectorAll('.session-option')]
       .map((el, i) => el.classList.contains('selected') ? i : -1)
       .filter(i => i >= 0);
     const selectedTokens = selectedIndices.map(i => letters[i].toLowerCase());
-    const rawCorrect = getQuestionCorrect(q);
-    let expectedTokens = [];
-    if (Array.isArray(rawCorrect)) expectedTokens = rawCorrect.map(normalizeOptionToken).filter(Boolean);
-    else if (rawCorrect && Array.isArray(rawCorrect.options)) expectedTokens = rawCorrect.options.map(normalizeOptionToken).filter(Boolean);
-    else if (rawCorrect?.value != null) expectedTokens = String(rawCorrect.value).split(/[,;\s]+/).map(normalizeOptionToken).filter(Boolean);
-    else if (rawCorrect?.option != null) expectedTokens = [normalizeOptionToken(rawCorrect.option)];
-
-    expectedTokens = [...new Set(expectedTokens)].sort();
+    const expectedTokens = getExpectedMultipleOptionTokens(q);
     const actualTokens = [...new Set(selectedTokens)].sort();
     const correct = JSON.stringify(actualTokens) === JSON.stringify(expectedTokens);
     recordAnswer(mode, { type: 'multiple', selectedIndices, correct, expected: expectedTokens });
     return correct;
   };
 
+  const expectedTokens = getExpectedMultipleOptionTokens(q);
   q.options.forEach((text, index) => {
     if (text == null || String(text).trim() === '') return;
     const el = document.createElement('div');
     el.className = 'session-option';
     el.innerHTML = `<div class="session-option-letter">${letters[index]}</div><span>${escapeHtml(text)}</span>`;
-    if (saved.includes(index)) el.classList.add('selected');
-    el.addEventListener('click', () => {
-      el.classList.toggle('selected');
-      if (isTest) evaluateAndRecord();
-    });
+    const isCorrectOption = expectedTokens.includes(letters[index].toLowerCase());
+    const isSelected = saved.includes(index);
+
+    if (isReview) {
+      el.classList.add("review-option");
+      if (isCorrectOption) el.classList.add("review-correct");
+      if (isSelected) el.classList.add(isCorrectOption ? "review-selected-correct" : "review-selected-wrong");
+    } else if (isSelected) {
+      el.classList.add('selected');
+    }
+
+    if (!isReview) {
+      el.addEventListener('click', () => {
+        el.classList.toggle('selected');
+        if (isTest) evaluateAndRecord();
+      });
+    }
     container.appendChild(el);
   });
+
+  if (isReview) {
+    const expectedLabels = expectedTokens.map(token => {
+      const idx = letters.findIndex(letter => letter.toLowerCase() === token);
+      return idx >= 0 ? `${letters[idx]}. ${q.options[idx]}` : token.toUpperCase();
+    });
+    const selectedLabels = saved.map(index => `${letters[index]}. ${q.options[index]}`).filter(Boolean);
+    const hasSelection = saved.length > 0;
+    const resultText = savedAnswer?.correct ? "Ваша відповідь правильна." : (hasSelection ? "Ваша відповідь неправильна." : "Ви не обрали відповідь.");
+    container.insertAdjacentHTML("beforeend", `
+      <div class="review-answer-summary ${savedAnswer?.correct ? "review-summary-correct" : "review-summary-wrong"}">
+        <div><strong>Результат:</strong> ${resultText}</div>
+        <div><strong>Правильні варіанти:</strong> ${escapeHtml(expectedLabels.join("; ") || "не визначено")}</div>
+        <div><strong>Ваш вибір:</strong> ${escapeHtml(selectedLabels.join("; ") || "не обрано")}</div>
+      </div>
+    `);
+    renderMathIn(container);
+    return;
+  }
 
   if (isTest) return;
 
@@ -1585,10 +1701,7 @@ function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
   resultEl.id = 'multiple-answer-result';
   container.appendChild(checkBtn);
   container.appendChild(resultEl);
-
-  if (savedAnswer && savedAnswer.type === 'multiple') {
-    resultEl.textContent = savedAnswer.correct ? 'Правильно' : 'Неправильно';
-  }
+  if (savedAnswer && savedAnswer.type === 'multiple') resultEl.textContent = savedAnswer.correct ? 'Правильно' : 'Неправильно';
 
   checkBtn.addEventListener('click', () => {
     const correct = evaluateAndRecord();
@@ -1596,24 +1709,31 @@ function renderMultipleChoiceQuestion(q, container, mode, savedAnswer) {
   });
 }
 
-function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
-  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
-  // відповідь зберігається автоматично під час введення.
-  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+function renderShortAnswerQuestion(q, container, mode, savedAnswer, isReview = false) {
   const isTest = mode === "test";
+  const expected = String(q.short_answer ?? "").trim();
+  const normalizeShortAnswer = (text) => String(text ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+  if (isReview) {
+    const userValue = savedAnswer?.type === "short" ? (savedAnswer.value || "") : "";
+    const hasValue = !!String(savedAnswer?.value || "").trim();
+    const resultText = savedAnswer?.correct ? "Ваша відповідь правильна." : (hasValue ? "Ваша відповідь неправильна." : "Ви не обрали відповідь.");
+    container.innerHTML = `
+      <div class="review-text-answer">
+        <div class="review-answer-summary ${savedAnswer?.correct ? "review-summary-correct" : "review-summary-wrong"}">
+          <div><strong>Результат:</strong> ${resultText}</div>
+          <div><strong>Правильна відповідь:</strong> ${escapeHtml(expected || "не заповнена в базі")}</div>
+          <div><strong>Ваша відповідь:</strong> ${escapeHtml(userValue || "не обрана")}</div>
+        </div>
+      </div>
+    `;
+    renderMathIn(container);
+    return;
+  }
 
   container.innerHTML = `<div class="short-answer-wrap"><input id="short-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь">${isTest ? "" : `<button id="short-answer-btn" class="primary-btn" type="button">Перевірити</button>`}<div id="short-answer-result"></div></div>`;
   const input = document.getElementById("short-answer-input");
   const resultEl = document.getElementById("short-answer-result");
-
-  const normalizeShortAnswer = (text) => String(text ?? "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-
-  // Для short_answer правильний ответ ВСЕГДА берём напрямую из колонки
-  // short_answer текущего вопроса. Не полагаемся на correct_answer/right_answer.
-  const expected = String(q.short_answer ?? "").trim();
 
   const evaluateAndRecord = () => {
     const value = input.value.trim();
@@ -1624,11 +1744,8 @@ function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
 
   if (savedAnswer && savedAnswer.type === "short") {
     input.value = savedAnswer.value || "";
-    if (!isTest) {
-      resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
-    }
+    if (!isTest) resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
   }
-
   if (isTest) {
     input.addEventListener("input", () => evaluateAndRecord());
     return;
@@ -1637,16 +1754,12 @@ function renderShortAnswerQuestion(q, container, mode, savedAnswer) {
   document.getElementById("short-answer-btn").addEventListener("click", () => {
     const value = input.value.trim();
     if (!value) return;
-
     if (!expected) {
       resultEl.textContent = "Неможливо перевірити: правильна відповідь не заповнена.";
       return;
     }
-
     const correct = evaluateAndRecord();
-    resultEl.textContent = correct
-      ? "Правильно"
-      : `Неправильно. Правильна відповідь: ${expected}`;
+    resultEl.textContent = correct ? "Правильно" : `Неправильно. Правильна відповідь: ${expected}`;
     renderMathIn(resultEl);
   });
 }
@@ -1659,10 +1772,7 @@ function normalizeMatchingChoice(value) {
   return OPTION_LETTERS.includes(token) ? `option_${token}` : raw;
 }
 
-function renderMatchingQuestion(q, container, mode, savedAnswer) {
-  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
-  // відповідь зберігається автоматично при кожному виборі варіанту.
-  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+function renderMatchingQuestion(q, container, mode, savedAnswer, isReview = false) {
   const isTest = mode === "test";
   const left = Array.isArray(q.matching_left) ? q.matching_left : [];
   const right = Array.isArray(q.matching_right) ? q.matching_right : [];
@@ -1676,11 +1786,29 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
   const savedSelections = savedAnswer?.type === "matching" ? (savedAnswer.selections || {}) : {};
   const optionLabel = (item) => String(typeof item === "object" ? (item.label ?? item.text ?? item.id ?? "") : item);
   const optionId = (item, index) => normalizeMatchingChoice(typeof item === "object" ? item.id : item) || `option_${OPTION_LETTERS[index]}`;
+  const expectedLabelById = (value) => {
+    const normalized = normalizeMatchingChoice(value);
+    const found = right.find((r, j) => optionId(r, j) === normalized);
+    return found ? optionLabel(found) : normalized || "—";
+  };
 
   container.innerHTML = left.map((item, i) => {
     const id = String(typeof item === "object" ? (item.id ?? i + 1) : i + 1);
     const label = typeof item === "object" ? (item.label ?? item.text ?? id) : item;
     const saved = normalizeMatchingChoice(savedSelections[id]);
+    const expected = normalizeMatchingChoice(correct[id] ?? correct[String(id)]);
+
+    if (isReview) {
+      const isPairCorrect = !!saved && !!expected && saved === expected;
+      return `
+        <div class="review-matching-row ${isPairCorrect ? "review-pair-correct" : "review-pair-wrong"}">
+          <div class="matching-subquestion">${escapeHtml(label)}</div>
+          <div class="review-matching-values">
+            <div><span class="review-value-label">Правильно:</span> ${escapeHtml(expectedLabelById(expected))}</div>
+            <div><span class="review-value-label">Ваш вибір:</span> ${escapeHtml(expectedLabelById(saved))}</div>
+          </div>
+        </div>`;
+    }
 
     const menuOptions = right.map((r, j) => {
       const rid = optionId(r, j);
@@ -1688,7 +1816,6 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
       const selectedClass = rid === saved ? " selected" : "";
       return `<button type="button" class="matching-choice-option${selectedClass}" data-value="${escapeHtml(rid)}">${escapeHtml(rl)}</button>`;
     }).join("");
-
     const selectedItem = right.find((r, j) => optionId(r, j) === saved);
     const selectedLabel = selectedItem ? optionLabel(selectedItem) : "—";
 
@@ -1703,19 +1830,25 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
           <div class="matching-choice-menu">${menuOptions}</div>
         </div>
       </div>`;
-  }).join("") + (isTest ? "" : `<button id="matching-btn" class="primary-btn" type="button">Перевірити</button><div id="matching-result"></div>`);
+  }).join("") + (isTest || isReview ? "" : `<button id="matching-btn" class="primary-btn" type="button">Перевірити</button><div id="matching-result"></div>`);
+
+  if (isReview) {
+    container.insertAdjacentHTML("beforeend", `
+      <div class="review-answer-summary ${savedAnswer?.correct ? "review-summary-correct" : "review-summary-wrong"}">
+        <div><strong>Результат:</strong> ${savedAnswer?.correct ? "Усі пари правильні." : (savedAnswer ? `Правильно ${savedAnswer.correctCount || 0} з ${savedAnswer.total || left.length}.` : "Ви не заповнили завдання повністю.")}</div>
+      </div>
+    `);
+    renderMathIn(container);
+    return;
+  }
 
   const closeMenus = (except = null) => {
-    container.querySelectorAll(".matching-choice.open").forEach(menu => {
-      if (menu !== except) menu.classList.remove("open");
-    });
+    container.querySelectorAll(".matching-choice.open").forEach(menu => { if (menu !== except) menu.classList.remove("open"); });
   };
-
   const evaluateAndRecord = () => {
     const choices = [...container.querySelectorAll(".matching-choice")];
     let correctCount = 0;
     const selections = {};
-
     choices.forEach(choice => {
       const key = String(choice.dataset.id);
       const userValue = normalizeMatchingChoice(choice.dataset.value);
@@ -1723,29 +1856,20 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
       selections[key] = userValue;
       if (userValue && expected && userValue === expected) correctCount++;
     });
-
     const ok = choices.length > 0 && correctCount === choices.length;
-    recordAnswer(mode, {
-      type: "matching",
-      selections,
-      correctCount,
-      total: choices.length,
-      correct: ok
-    });
+    recordAnswer(mode, { type: "matching", selections, correctCount, total: choices.length, correct: ok });
     return { correctCount, total: choices.length };
   };
 
   container.querySelectorAll(".matching-choice").forEach(choice => {
     const trigger = choice.querySelector(".matching-choice-trigger");
     const valueEl = choice.querySelector(".matching-choice-value");
-
     trigger.addEventListener("click", (event) => {
       event.stopPropagation();
       const wasOpen = choice.classList.contains("open");
       closeMenus(choice);
       choice.classList.toggle("open", !wasOpen);
     });
-
     choice.querySelectorAll(".matching-choice-option").forEach(option => {
       option.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -1759,28 +1883,20 @@ function renderMatchingQuestion(q, container, mode, savedAnswer) {
         if (isTest) evaluateAndRecord();
       });
     });
-
     renderMathIn(valueEl);
     choice.querySelectorAll(".matching-choice-option").forEach(option => renderMathIn(option));
   });
 
   if (isTest) return;
-
   const resultEl = document.getElementById("matching-result");
-  if (savedAnswer && savedAnswer.type === "matching") {
-    resultEl.textContent = `Правильно: ${savedAnswer.correctCount} з ${savedAnswer.total}`;
-  }
-
+  if (savedAnswer && savedAnswer.type === "matching") resultEl.textContent = `Правильно: ${savedAnswer.correctCount} з ${savedAnswer.total}`;
   document.getElementById("matching-btn").addEventListener("click", () => {
     const { correctCount, total } = evaluateAndRecord();
     resultEl.textContent = `Правильно: ${correctCount} з ${total}`;
   });
 }
 
-function renderTableQuestion(q, container, mode, savedAnswer) {
-  // Пробний тест: без кнопки «Перевірити» й без підсвітки правильності —
-  // відповідь зберігається автоматично під час введення.
-  // Навчальна сесія: кнопка «Перевірити» та результат показуються як раніше.
+function renderTableQuestion(q, container, mode, savedAnswer, isReview = false) {
   const isTest = mode === "test";
   const data = q.table_data;
   if (!data) { container.innerHTML = "<p>Для табличного завдання не заповнено table_data.</p>"; return; }
@@ -1788,30 +1904,41 @@ function renderTableQuestion(q, container, mode, savedAnswer) {
   if (Array.isArray(data)) rows = data;
   else { headers = data.headers || data.columns || []; rows = data.rows || []; }
   if (!headers.length && rows.length && Array.isArray(rows[0])) headers = rows[0].map((_,i)=>`Колонка ${i+1}`);
+  const c = getQuestionCorrect(q);
+  const expected = String(c.value ?? c.option ?? "").trim();
+  const userValue = savedAnswer?.type === "table" ? (savedAnswer.value || "") : "";
+
+  if (isReview) {
+    const hasValue = !!String(savedAnswer?.value || "").trim();
+    const resultText = savedAnswer?.correct ? "Ваша відповідь правильна." : (hasValue ? "Ваша відповідь неправильна." : "Ви не обрали відповідь.");
+    container.innerHTML = `
+      <div class="question-table-wrap"><table class="question-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${(Array.isArray(r)?r:Object.values(r)).map(v=>`<td>${escapeHtml(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <div class="review-answer-summary ${savedAnswer?.correct ? "review-summary-correct" : "review-summary-wrong"}">
+        <div><strong>Результат:</strong> ${resultText}</div>
+        <div><strong>Правильна відповідь:</strong> ${escapeHtml(expected || "не заповнена в базі")}</div>
+        <div><strong>Ваша відповідь:</strong> ${escapeHtml(userValue || "не обрана")}</div>
+      </div>`;
+    renderMathIn(container);
+    return;
+  }
 
   container.innerHTML = `<div class="question-table-wrap"><table class="question-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${(Array.isArray(r)?r:Object.values(r)).map(v=>`<td>${escapeHtml(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="table-answer-wrap"><input id="table-answer-input" class="auth-input" type="text" placeholder="Введіть відповідь">${isTest ? "" : `<button id="table-answer-btn" class="primary-btn" type="button">Перевірити</button>`}<div id="table-answer-result"></div></div>`;
   const input = document.getElementById("table-answer-input");
   const resultEl = document.getElementById("table-answer-result");
-  const c = getQuestionCorrect(q);
-  const expected = String(c.value ?? c.option ?? "").trim();
-
   const evaluateAndRecord = () => {
     const value = input.value.trim();
     const ok = value.toLowerCase() === expected.toLowerCase();
     recordAnswer(mode, { type: "table", value, expected, correct: ok });
     return ok;
   };
-
   if (savedAnswer && savedAnswer.type === "table") {
     input.value = savedAnswer.value || "";
     if (!isTest) resultEl.textContent = savedAnswer.correct ? "Правильно" : `Неправильно. Правильна відповідь: ${savedAnswer.expected}`;
   }
-
   if (isTest) {
     input.addEventListener("input", () => evaluateAndRecord());
     return;
   }
-
   document.getElementById("table-answer-btn").addEventListener("click", () => {
     const ok = evaluateAndRecord();
     resultEl.textContent = ok ? "Правильно" : `Неправильно. Правильна відповідь: ${expected}`;
@@ -1820,24 +1947,17 @@ function renderTableQuestion(q, container, mode, savedAnswer) {
 
 function advanceQuestion(mode) {
   if (currentQuestionIndex >= activeQuestions.length - 1) return;
-
-  // Время сохраняем при уходе со страницы вопроса.
-  // Но замораживаем его только когда выполнены ОБА условия:
-  // 1) есть выбранный/проверенный ответ;
-  // 2) пользователь нажал «Следующее».
-  captureCurrentQuestionElapsed();
-  questionFinalized[currentQuestionIndex] = !!questionAnswers[currentQuestionIndex];
+  if (!reviewMode) {
+    captureCurrentQuestionElapsed();
+    questionFinalized[currentQuestionIndex] = !!questionAnswers[currentQuestionIndex];
+  }
   currentQuestionIndex++;
   renderQuestion(mode);
 }
 
 function goToPreviousQuestion(mode) {
   if (currentQuestionIndex <= 0) return;
-
-  // Для «Назад» таймер не считается завершённым. Мы только сохраняем
-  // уже набежавшее время; при возврате на неотвеченный вопрос отсчёт
-  // снова продолжится. У отвеченного вопроса он останется замороженным.
-  captureCurrentQuestionElapsed();
+  if (!reviewMode) captureCurrentQuestionElapsed();
   currentQuestionIndex--;
   renderQuestion(mode);
 }
@@ -1874,6 +1994,7 @@ function tallyRawScore() {
 }
 
 async function finishLearningSession() {
+  reviewMode = false;
   captureCurrentQuestionElapsed();
   correctAnswersCount = tallyResults();
 
@@ -1953,6 +2074,7 @@ function lookupNmtScore(subject, raw) {
 }
 
 async function finishTrialTest(autoFinished = false) {
+  reviewMode = false;
   captureCurrentQuestionElapsed();
   correctAnswersCount = tallyResults();
 
@@ -1997,6 +2119,10 @@ document.getElementById("test-finish-btn").addEventListener("click", async () =>
   try { await finishTrialTest(); } catch (e) { alert("Помилка збереження результату тесту: " + e.message); }
 });
 document.getElementById("session-exit-btn").addEventListener("click", () => {
+  if (reviewMode) {
+    exitQuestionReview();
+    return;
+  }
   stopAllTimers();
   questionElapsedMs = [];
   showScreen("screen-dashboard");
@@ -2006,7 +2132,7 @@ document.getElementById("test-exit-btn").addEventListener("click", () => {
   questionElapsedMs = [];
   showScreen("screen-dashboard");
 });
-document.getElementById("result-back-btn").addEventListener("click", () => showScreen("screen-dashboard"));
+document.getElementById("result-back-btn").addEventListener("click", () => { reviewMode = false; showScreen("screen-dashboard"); });
 
 /* ---------------------------------------------------------------------
    КОНТАКТИ — Android: відкрити саме Gmail з адресою в «Кому»
