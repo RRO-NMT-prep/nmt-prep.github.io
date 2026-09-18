@@ -1137,7 +1137,7 @@ function renderCompletedAnalytics() {
         <div class="result-q-footer">
           <span class="result-q-time">${item.timeMs ? formatTime(item.timeMs) : "—"}</span>
           <span class="result-q-limit-note">${item.timeMs ? (goodTime ? "Темп у нормі" : "Повільніше за рекомендацію") : "Час не зафіксовано"}</span>
-          <button type="button" class="secondary-btn result-review-btn" data-review-index="${item.number - 1}">Увидеть решение</button>
+          <button type="button" class="secondary-btn result-review-btn" data-review-index="${item.number - 1}">Побачити рішення</button>
         </div>
       </div>
     `;
